@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Readability output was glued plain text, not markdown.** Whenever Readability won in tier 2
+  or tier 3 (and on the Kiwix path), the server returned `article.textContent`, which drops
+  every block boundary: `nodejs.org/api/fs.html` came back as "functions.To use the
+  promise-based APIs:import * as fs from 'node:fs/promises';…javascriptTo use…". The text is
+  now markdown converted (via `turndown`) from Readability's cleaned article element: ATX
+  headings, blank-line paragraphs, compact lists, fenced code with the language taken from
+  `language-x`/`lang-x`/`data-lang`, inline code, links resolved to absolute URLs, blockquotes,
+  GFM tables (one line per row when spans make a grid impossible), images reduced to alt text.
+  Same-page anchors and permalink `#` links are dropped, and only the first link to a given
+  URL keeps it — reference docs link every type mention, ~130 KB of repeated URLs on the fs
+  page. `preferReadability` now compares both markdown candidates on prose length (link
+  targets and syntax stripped) so neither side wins on URL or syntax bytes.
+
 - **`fetch_url` answered most github.com pages with the repo's README.** The GitHub fast path
   claimed every `github.com` URL but only knew two shapes, `blob` files and the repo root, so
   `…/releases`, `…/releases/tag/<tag>`, `…/issues/<n>`, `…/pull/<n>`, `…/commit/<sha>`, wiki and
