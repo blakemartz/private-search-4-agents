@@ -323,7 +323,7 @@ describe("preferReadability — decision table holds for all inputs", () => {
   );
 
   it(
-    "below the 500-char floor, any readability result wins; above it, only a longer one does",
+    "below the 500-char floor, any readability result wins; above it, one keeping ≥40% of the prose does",
     () => {
       fc.assert(
         fc.property(
@@ -336,7 +336,7 @@ describe("preferReadability — decision table holds for all inputs", () => {
             );
             // Restating the rule independently of the implementation, so a change
             // to either branch is caught rather than mirrored.
-            const expected = curLen < 500 ? true : readLen > curLen;
+            const expected = curLen < 500 ? true : readLen >= curLen * 0.4;
             expect(decision).toBe(expected);
           },
         ),

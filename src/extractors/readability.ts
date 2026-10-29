@@ -73,6 +73,20 @@ export function runReadability(
 const MIN_TEXT_CHARS = 500;
 
 /**
+ * Readability wins when it kept at least this share of the tier's prose.
+ *
+ * It used to have to be LONGER, which is backwards: Readability's job is to
+ * drop navigation, banners and footers, so on a well-formed page its output is
+ * shorter by design, and the rule handed the win to Crawl4AI's raw markdown
+ * — which opens with the site chrome. Measured 2026-10-28 over ten live pages
+ * (prose length, Readability ÷ Crawl4AI): real articles and docs landed at
+ * 0.56–0.94 (valkey.io 0.56, percona 0.68, MDN 0.85, docs.rs 0.88), where
+ * Readability is the clean article; genuine Readability failures landed at
+ * 0.03 (a Wikipedia stub) and 0.11 (Hacker News). 0.4 sits in that gap.
+ */
+const MIN_READABILITY_SHARE = 0.4;
+
+/**
  * Whether Readability's markdown should replace the tier's own markdown.
  * Both sides are markdown, so they are compared on prose length (link
  * targets and syntax stripped), not raw length: otherwise a nav-heavy
@@ -85,5 +99,5 @@ export function preferReadability(
   if (!readability) return false;
   const currentLen = proseLength(current.text);
   if (currentLen < MIN_TEXT_CHARS) return true;
-  return proseLength(readability.text) > currentLen;
+  return proseLength(readability.text) >= currentLen * MIN_READABILITY_SHARE;
 }
