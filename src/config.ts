@@ -394,3 +394,9 @@ export const RERANK_RECENCY_WEIGHT = (() => {
   }
   return v;
 })();
+
+// Operator-only MCP tools (clear_cache, domain_stats). Off unless set to
+// exactly "true": they are not part of an agent's search workflow, and
+// clear_cache wipes cache shared by every agent on the box.
+export const ADMIN_TOOLS_ENABLED =
+  process.env.SEARXNG_MCP_ADMIN_TOOLS === "true";

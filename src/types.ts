@@ -25,6 +25,8 @@ export interface SearxResult {
   engine?: string;
   engines?: string[];
   publishedDate?: string;
+  /** Raw cross-encoder relevance, set only when the reranker scored it. */
+  relevance?: number;
 }
 
 // SearXNG's raw JSON carries these alongside `results`. Their shapes vary a bit

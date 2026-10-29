@@ -1,8 +1,11 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
     environment: "node",
+    // Agent worktrees live under .claude/worktrees inside the repo; without
+    // this every run also collects their copies of the suite.
+    exclude: [...configDefaults.exclude, ".claude/**"],
     typecheck: {
       tsconfig: "./tsconfig.test.json",
     },

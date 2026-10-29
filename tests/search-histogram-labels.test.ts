@@ -1,14 +1,12 @@
 /**
- * Labels on the shared `search` histogram, and latency on the failure path.
+ * Labels on the `search` histogram, and latency on the failure path.
  *
- * All three search tools record into ONE histogram. Before this it carried only
- * `profile`, so a duration could not be attributed to the tool that produced
- * it — and the three have very different normal ranges (a plain `search` is
- * bounded around ~17.5s; `search_and_summarize` routinely runs to ~50s because
- * it adds up to five fetches and an Ollama call). The 7-day maximum of 51.6s
- * was therefore uninterpretable: routine for one tool, alarming for another.
+ * `search` is the only tool that records into this histogram (the former
+ * `search_and_fetch` / `search_and_summarize` tools were folded into
+ * `search`'s `content: "full"`). The `tool` label is kept so the series stays
+ * attributable if another search-shaped tool is ever added.
  *
- * The failure path recorded no duration at all, only `errors_total`, so a
+ * The failure path used to record no duration at all, only `errors_total`, so a
  * search that failed after 40s looked exactly like one that failed instantly.
  *
  * NOT covered here, deliberately: a *hang*. Both recordings happen after
@@ -48,16 +46,12 @@ vi.mock("../src/reranker.js", () => ({
 }));
 
 vi.mock("../src/fetch.js", () => ({
+  FETCH_STORE_CEILING: 1_000_000,
   fetchPage: vi.fn().mockResolvedValue({
     title: "P",
     url: "https://example.com/1",
     text: "text",
   }),
-}));
-
-vi.mock("../src/ollama.js", () => ({
-  summarizePages: vi.fn().mockResolvedValue({ summary: "s", citations: [] }),
-  formatSummaryResult: vi.fn().mockReturnValue("## Summary"),
 }));
 
 vi.mock("../src/observability.js", () => ({
@@ -73,11 +67,7 @@ vi.mock("../src/context.js", () => ({
 
 import { incCounter, recordHistogram } from "../src/observability.js";
 import { searxSearch } from "../src/search.js";
-import {
-  handleSearch,
-  handleSearchAndFetch,
-  handleSearchAndSummarize,
-} from "../src/tools.js";
+import { handleSearch } from "../src/tools.js";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -93,48 +83,34 @@ function soleSearchHistogram() {
 }
 
 describe("search histogram — tool label", () => {
+  // `content: "full"` adds page fetches to the same call; it must not change the
+  // label or record a second sample.
   const cases = [
-    ["search", () => handleSearch({ query: "q", num_results: 3 })],
+    ["plain", () => handleSearch({ query: "q", max_results: 3 })],
     [
-      "search_and_fetch",
-      () => handleSearchAndFetch({ query: "q", fetch_count: 1 }),
-    ],
-    [
-      "search_and_summarize",
-      () => handleSearchAndSummarize({ query: "q", fetch_count: 1 }),
+      "content=full",
+      () => handleSearch({ query: "q", max_results: 3, content: "full" }),
     ],
   ] as const;
 
-  for (const [toolName, invoke] of cases) {
-    it(`records the histogram labelled tool=${toolName}`, async () => {
+  for (const [variant, invoke] of cases) {
+    it(`records the histogram labelled tool=search (${variant})`, async () => {
       await invoke();
       expect(soleSearchHistogram().attrs).toMatchObject({
-        tool: toolName,
+        tool: "search",
         outcome: "ok",
       });
     });
 
-    it(`records the counter labelled tool=${toolName}`, async () => {
+    it(`records the counter labelled tool=search (${variant})`, async () => {
       await invoke();
       const calls = vi
         .mocked(incCounter)
         .mock.calls.filter((c) => c[0] === "search");
       expect(calls).toHaveLength(1);
-      expect(calls[0][1]).toMatchObject({ tool: toolName });
+      expect(calls[0][1]).toMatchObject({ tool: "search" });
     });
   }
-
-  it("gives the three tools three DIFFERENT labels", async () => {
-    // The point of the label is discrimination. Asserting each tool's value in
-    // isolation would still pass if every one of them emitted "search".
-    const seen: string[] = [];
-    for (const [, invoke] of cases) {
-      vi.clearAllMocks();
-      await invoke();
-      seen.push(soleSearchHistogram().attrs?.tool as string);
-    }
-    expect(new Set(seen).size).toBe(3);
-  });
 });
 
 describe("search histogram — failure path", () => {
@@ -149,7 +125,7 @@ describe("search histogram — failure path", () => {
       .mockReturnValueOnce(1_000)
       .mockReturnValueOnce(41_000);
 
-    await expect(handleSearch({ query: "q", num_results: 3 })).rejects.toThrow(
+    await expect(handleSearch({ query: "q", max_results: 3 })).rejects.toThrow(
       "searxng down",
     );
     now.mockRestore();
@@ -161,16 +137,16 @@ describe("search histogram — failure path", () => {
 
   it("labels the error counter with the tool", async () => {
     vi.mocked(searxSearch).mockRejectedValueOnce(new Error("boom"));
-    await expect(
-      handleSearchAndFetch({ query: "q", fetch_count: 1 }),
-    ).rejects.toThrow("boom");
+    await expect(handleSearch({ query: "q", max_results: 3 })).rejects.toThrow(
+      "boom",
+    );
 
     const errCalls = vi
       .mocked(incCounter)
       .mock.calls.filter((c) => c[0] === "errors");
     expect(errCalls).toHaveLength(1);
     expect(errCalls[0][1]).toMatchObject({
-      tool: "search_and_fetch",
+      tool: "search",
       stage: "search",
     });
   });
@@ -178,13 +154,13 @@ describe("search histogram — failure path", () => {
   it("separates ok from error via outcome rather than merging the two", async () => {
     // Without `outcome`, error latencies would land in the same series as
     // successes and skew the p99 the histogram exists to report.
-    await handleSearch({ query: "q", num_results: 3 });
+    await handleSearch({ query: "q", max_results: 3 });
     const ok = soleSearchHistogram().attrs?.outcome;
 
     vi.clearAllMocks();
     vi.mocked(searxSearch).mockRejectedValueOnce(new Error("x"));
     await expect(
-      handleSearch({ query: "q", num_results: 3 }),
+      handleSearch({ query: "q", max_results: 3 }),
     ).rejects.toThrow();
     const err = soleSearchHistogram().attrs?.outcome;
 

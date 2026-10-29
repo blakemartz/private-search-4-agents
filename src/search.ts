@@ -202,6 +202,8 @@ export async function searxSearch(
   language?: string,
   engines?: string,
   site?: string | string[],
+  /** Skip the cache read (the fresh result is still written back). */
+  fresh = false,
 ): Promise<SearxSearchResult> {
   const shouldExpand = expand ?? EXPAND_QUERIES_DEFAULT;
 
@@ -211,7 +213,7 @@ export async function searxSearch(
   const cacheKeyInput = `${query}|engines=${engines ?? ""}|site=${siteKey}`;
   const key = searchCacheKey(cacheKeyInput, category, timeRange);
   const cached = await cacheGet(key);
-  if (cached && !shouldExpand) {
+  if (cached && !shouldExpand && !fresh) {
     try {
       const parsed = JSON.parse(cached) as
         | SearxResult[]

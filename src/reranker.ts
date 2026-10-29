@@ -69,7 +69,11 @@ async function rerank(
       : scored.filter((s) => s.relevance >= minScore);
 
   kept.sort((a, b) => b.score - a.score);
-  return kept.slice(0, topN).map((s) => s.result);
+  // The raw relevance rides along on the result so callers can show it. It is
+  // the same value min_score filters on, never the recency-adjusted score.
+  return kept
+    .slice(0, topN)
+    .map((s) => ({ ...s.result, relevance: s.relevance }));
 }
 
 export async function rerankWithFallback(
@@ -125,6 +129,47 @@ export async function rerankWithFallback(
           );
         }
         return results.slice(0, topN);
+      }
+    },
+  );
+}
+
+/**
+ * Raw cross-encoder relevance of each document to `query`, index-aligned with
+ * `documents`. Null when the reranker is off or unavailable, so the caller can
+ * pick its own fallback rather than treating a degraded score as a real one.
+ */
+export async function scorePassages(
+  query: string,
+  documents: string[],
+): Promise<number[] | null> {
+  if (RERANKER_URL === "" || documents.length === 0) return null;
+  return withSpan(
+    "rerank_passages",
+    { "rerank.candidates": documents.length },
+    async () => {
+      try {
+        const res = await fetch(`${RERANKER_URL}/v1/rerank`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, documents, top_n: documents.length }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) throw new Error(`Reranker error: ${res.status}`);
+        const data = (await res.json()) as RerankResponse;
+        const scores = new Array<number>(documents.length).fill(0);
+        for (const r of data.results) {
+          if (r.index >= 0 && r.index < documents.length) {
+            scores[r.index] = r.relevance_score;
+          }
+        }
+        return scores;
+      } catch (err) {
+        logThrottled(
+          "degrade:reranker:passages",
+          `reranker unavailable — passage selection falls back to term overlap: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return null;
       }
     },
   );

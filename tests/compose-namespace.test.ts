@@ -27,7 +27,14 @@ import { parse } from "yaml";
 
 function composeFiles(dir: string, found: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
-    if (entry === "node_modules" || entry === ".git" || entry === "dist")
+    // `.claude` holds agent worktrees — full checkouts whose compose files
+    // would otherwise be counted again.
+    if (
+      entry === "node_modules" ||
+      entry === ".git" ||
+      entry === "dist" ||
+      entry === ".claude"
+    )
       continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) composeFiles(full, found);

@@ -55,6 +55,11 @@ loadDomainConfig();
 // Hot-reload: re-read domains.json whenever it changes without restarting the MCP server
 watchFile(DOMAINS_PATH, { interval: 5000 }, loadDomainConfig);
 
+/** Names of the configured domain profiles, for advertising as an enum. */
+export function getProfileNames(): string[] {
+  return Object.keys(domainConfig.profiles);
+}
+
 export function getBlockList(profile?: string): string[] {
   const base = domainConfig.block;
   if (!profile || !domainConfig.profiles[profile]) return base;

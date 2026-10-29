@@ -195,12 +195,13 @@ async function runTier<T extends TierResult | null>(
   }
 }
 
-// The fetch cache stores content at this size and callers slice it down on
-// read. A caller requesting more than the historical 8000-char default (e.g. a
-// large fetch_url max_tokens budget) raises the store size up to this hard
-// ceiling; smaller requests still store 8000 so entries stay reusable.
+// The fetch cache always stores up to this ceiling and callers slice it down on
+// read. It used to store 8000 unless a caller asked for more, and a cached
+// 8000-char entry is never refetched — so a page first seen through a small
+// budget could not be paged past 8000 for the life of the entry. Storing the
+// ceiling unconditionally is what makes fetch_url's `offset` paging real.
 const DEFAULT_FETCH_CHARS = 8000;
-const FETCH_STORE_CEILING = 40000;
+export const FETCH_STORE_CEILING = 40000;
 
 export async function fetchPage(
   url: string,
@@ -208,17 +209,13 @@ export async function fetchPage(
   domainProfile?: string,
   preferFit = false,
   tuning?: FetchTuning,
+  /** Skip the cache read (the fresh result is still written back). */
+  fresh = false,
 ): Promise<{ title: string; url: string; text: string }> {
   return withSpan("fetch", { "fetch.url": url }, async () => {
     const t_total = Date.now();
     assertPublicUrl(url);
-    // How much to actually fetch/store: at least the default (keeps cache
-    // entries reusable), at most the hard ceiling, but never less than what the
-    // caller asked to read back.
-    const storeChars = Math.min(
-      Math.max(maxChars, DEFAULT_FETCH_CHARS),
-      FETCH_STORE_CEILING,
-    );
+    const storeChars = FETCH_STORE_CEILING;
     events.fetchRequested({ url, max_chars: maxChars, prefer_fit: preferFit });
 
     // Refuse to fetch blocked domains
@@ -233,9 +230,9 @@ export async function fetchPage(
       throw new Error(`Domain is blocked by domain filter configuration`);
     }
 
-    // Check fetch cache — always stored at 8000 chars, sliced to maxChars on read
+    // Check fetch cache — stored at FETCH_STORE_CEILING, sliced to maxChars on read
     const key = fetchCacheKey(url);
-    const cached = await cacheGet(key);
+    const cached = fresh ? null : await cacheGet(key);
     if (cached) {
       try {
         const r = JSON.parse(cached) as {
@@ -243,6 +240,16 @@ export async function fetchPage(
           url: string;
           text: string;
         };
+        // Entries written before the store size was fixed at the ceiling were
+        // cut at exactly DEFAULT_FETCH_CHARS. Serving one to a caller that
+        // wants more would report an 8000-char page that is really longer, so
+        // treat it as a miss and refetch. Self-retiring: the fetch TTL is 24h.
+        if (
+          r.text.length === DEFAULT_FETCH_CHARS &&
+          maxChars > DEFAULT_FETCH_CHARS
+        ) {
+          throw new Error("legacy truncated cache entry");
+        }
         events.fetchCompleted({
           url,
           tier_served: "cache",
@@ -252,7 +259,7 @@ export async function fetchPage(
         });
         return { ...r, text: r.text.slice(0, maxChars) };
       } catch {
-        // Corrupted cache entry — fall through to live fetch
+        // Corrupted or legacy-truncated entry — fall through to live fetch
       }
     }
 

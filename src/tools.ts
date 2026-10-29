@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { cacheClear } from "./cache.js";
+import { ADMIN_TOOLS_ENABLED } from "./config.js";
 import { newRequestId, withRequestId } from "./context.js";
 import { crawlSite, formatCrawlManifest } from "./crawl.js";
 import {
@@ -15,8 +16,9 @@ import {
   formatDomainRecord,
   summarizeDomainRecord,
 } from "./domain-stats.js";
+import { getProfileNames, urlMatchesDomain } from "./domains.js";
 import { events } from "./events.js";
-import { fetchPage } from "./fetch.js";
+import { FETCH_STORE_CEILING, fetchPage } from "./fetch.js";
 import type { FetchTuning } from "./fetch-utils.js";
 import { redactUrlCredentialsInText } from "./log.js";
 import { incCounter, recordHistogram, withSpan } from "./observability.js";
@@ -25,10 +27,13 @@ import {
   formatSummaryResult,
   summarizePages,
 } from "./ollama.js";
+import { findPassages, formatPassages, windowText } from "./paging.js";
+import { selectPassages } from "./passages.js";
 import { rerankWithFallback } from "./reranker.js";
 import { searxSearch } from "./search.js";
 import {
   CategorySchema,
+  type Citation,
   type SearxMeta,
   type SearxResult,
   TimeRangeSchema,
@@ -52,11 +57,11 @@ interface SearchEventCtx {
 }
 
 /**
- * The three tools that share the `search` histogram. Naming the union rather
- * than taking a bare string keeps a typo out of the label set — a stray value
- * would not fail anything at runtime, it would quietly create a fourth series.
+ * The tools that share the `search` histogram. A named union rather than a
+ * bare string keeps a typo out of the label set — a stray value would not fail
+ * anything at runtime, it would quietly create a new series.
  */
-type SearchToolName = "search" | "search_and_fetch" | "search_and_summarize";
+type SearchToolName = "search";
 
 async function withSearchEvents<T>(
   toolName: SearchToolName,
@@ -123,7 +128,7 @@ async function withSearchEvents<T>(
 }
 
 /**
- * `instrumentTool` + `withSearchEvents` for the three search tools, so the tool
+ * `instrumentTool` + `withSearchEvents` for the search tool, so the tool
  * name is written once per call site. Passing it separately to each would let
  * the span name and the metric label drift apart silently.
  *
@@ -145,29 +150,110 @@ async function instrumentSearchTool<T>(
   return instrumentTool(toolName, () => withSearchEvents(toolName, ctx, fn));
 }
 
-const DomainProfileSchema = z
-  .string()
-  .optional()
-  .describe(
-    "Named domain profile to apply: 'homelab', 'dev', or omit for default filters",
-  );
+// ── search ──────────────────────────────────────────────────────────────────
+//
+// Shaped after what Tavily, Exa and Gemini grounding converge on: one search
+// call whose options decide how much of each result comes back (`content`) and
+// whether a synthesized, cited answer comes with it (`answer`), rather than a
+// separate tool per combination.
 
-function formatResults(results: SearxResult[]): string {
-  if (results.length === 0) return "No results found.";
+/** Most phrasings one `search` call fans out to. */
+const MAX_QUERIES = 5;
+/** Most URLs one `fetch_url` call reads. */
+const MAX_URLS = 5;
 
-  return results
-    .map((r, i) => {
-      const engine = r.engines?.[0] ?? r.engine ?? "unknown";
-      const date = r.publishedDate ? ` [${r.publishedDate}]` : "";
-      const snippet = r.content ? `\n   ${r.content.slice(0, 250)}` : "";
-      return `${i + 1}. ${r.title}${date}\n   URL: ${r.url}\n   Source: ${engine}${snippet}`;
+// Rough token→char conversion for budgets. Deliberately a cheap heuristic
+// (chars ≈ tokens × 4), not an exact tokenizer.
+const CHARS_PER_TOKEN = 4;
+const FETCH_DEFAULT_CHARS = 8000;
+/** Per-page default when several URLs are read at once. */
+const FETCH_MULTI_DEFAULT_CHARS = 4000;
+const SNIPPET_CHARS = 250;
+
+/** Results whose pages `content: "highlights"` reads. */
+const HIGHLIGHT_PAGES = 5;
+const HIGHLIGHTS_PER_RESULT = 2;
+const HIGHLIGHT_CHARS = 600;
+/** Results whose pages `content: "full"` returns, sharing one budget. */
+const FULL_PAGES = 3;
+const FULL_TOTAL_CHARS = 8000;
+/** Pages the answer is synthesized from, and how much of each it reads. */
+const ANSWER_PAGES = 3;
+const ANSWER_PAGE_CHARS = 4000;
+/** Reranker relevance below which a result's page is never fetched. */
+const OFF_TOPIC = 0.01;
+/** Passages fetch_url returns for a semantic `query`. */
+const QUERY_PASSAGES = 5;
+
+export type ContentMode = "snippets" | "highlights" | "full";
+
+interface Highlight {
+  offset: number;
+  text: string;
+  score: number;
+}
+
+/** A ranked result, the phrasing that produced it, and any passages picked from its page. */
+interface RankedHit {
+  result: SearxResult;
+  queryIndex: number;
+  highlights?: Highlight[];
+}
+
+function toList(v: string | string[] | undefined): string[] {
+  if (v === undefined) return [];
+  return (Array.isArray(v) ? v : [v]).map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * One block per result, with what an agent ranks on: date and relevance. The
+ * engine name used to sit on its own line here; it cost a line per result and
+ * no caller acted on it, so it lives only in structuredContent.
+ */
+function formatHit(h: RankedHit, n: number): string {
+  const r = h.result;
+  const tags = [
+    r.publishedDate ? r.publishedDate.slice(0, 10) : null,
+    r.relevance !== undefined ? `rel ${r.relevance.toFixed(2)}` : null,
+  ].filter(Boolean);
+  const meta = tags.length > 0 ? ` (${tags.join(", ")})` : "";
+  let body = r.content
+    ? `\n   ${r.content.replace(/\s+/g, " ").trim().slice(0, SNIPPET_CHARS)}`
+    : "";
+  if (h.highlights && h.highlights.length > 0) {
+    body = h.highlights
+      .map(
+        (p) =>
+          `\n   > ${p.text.replace(/\s+/g, " ").slice(0, HIGHLIGHT_CHARS)} [offset ${p.offset}]`,
+      )
+      .join("");
+  }
+  return `${n}. ${r.title}${meta}\n   ${r.url}${body}`;
+}
+
+function formatHits(hits: RankedHit[], queries: string[]): string {
+  if (hits.length === 0) return "No results found.";
+  if (queries.length === 1) {
+    return hits.map((h, i) => formatHit(h, i + 1)).join("\n\n");
+  }
+  // Several phrasings: one section each, numbered continuously so "fetch #4"
+  // is unambiguous. A URL already listed under an earlier phrasing is not
+  // repeated (see mergeHits), so a section can come back short or empty.
+  let n = 0;
+  return queries
+    .map((q, qi) => {
+      const mine = hits.filter((h) => h.queryIndex === qi);
+      const body =
+        mine.length === 0
+          ? "   (nothing new beyond the phrasings above)"
+          : mine.map((h) => formatHit(h, ++n)).join("\n\n");
+      return `## ${q}\n\n${body}`;
     })
     .join("\n\n");
 }
 
 // SearXNG's native answers/infoboxes/corrections/suggestions, rendered above
-// the ranked list. Returns "" when there's nothing to surface so callers can
-// skip the separator.
+// the ranked list. Returns "" when there's nothing to surface.
 function formatMeta(meta: SearxMeta): string {
   const blocks: string[] = [];
   if (meta.answers.length > 0) {
@@ -196,17 +282,111 @@ function formatMeta(meta: SearxMeta): string {
   return blocks.join("\n\n");
 }
 
-// Prepend surfaced meta (if any) to a result body.
-function withMeta(meta: SearxMeta, body: string): string {
-  const metaText = formatMeta(meta);
-  return metaText ? `${metaText}\n\n${body}` : body;
+function mergeMeta(metas: SearxMeta[]): SearxMeta {
+  const uniq = <T>(xs: T[], key: (x: T) => string) => [
+    ...new Map(xs.map((x) => [key(x), x])).values(),
+  ];
+  return {
+    answers: uniq(
+      metas.flatMap((m) => m.answers),
+      (a) => a.answer,
+    ),
+    infoboxes: uniq(
+      metas.flatMap((m) => m.infoboxes),
+      (i) => `${i.title}|${i.content}`,
+    ),
+    corrections: [...new Set(metas.flatMap((m) => m.corrections))],
+    suggestions: [...new Set(metas.flatMap((m) => m.suggestions))],
+  };
 }
 
-// Structured payload for the `search` tool so callers can programmatically
-// check for a direct answer without parsing the text block. Shape matches
-// SearchOutputSchema (validated by the SDK before it leaves the server).
-function buildSearchStructured(meta: SearxMeta, results: SearxResult[]) {
+/** Flatten per-phrasing rankings, keeping each URL under its first phrasing. */
+export function mergeHits(perQuery: SearxResult[][]): RankedHit[] {
+  const seen = new Set<string>();
+  const out: RankedHit[] = [];
+  perQuery.forEach((results, queryIndex) => {
+    for (const result of results) {
+      if (seen.has(result.url)) continue;
+      seen.add(result.url);
+      out.push({ result, queryIndex });
+    }
+  });
+  return out;
+}
+
+/**
+ * include_domains is a hard filter (Tavily's `restrict`), applied after the
+ * search even though it is also sent as a `site:` operator: some engines ignore
+ * the operator, and a caller who named domains should not get others back.
+ */
+export function filterDomains(
+  results: SearxResult[],
+  include: string[],
+  exclude: string[],
+): SearxResult[] {
+  return results.filter(
+    (r) =>
+      (include.length === 0 ||
+        include.some((d) => urlMatchesDomain(r.url, d))) &&
+      !exclude.some((d) => urlMatchesDomain(r.url, d)),
+  );
+}
+
+type Page = { title: string; url: string; text: string };
+
+async function fetchPages(
+  urls: string[],
+  domainProfile: string | undefined,
+  fresh: boolean,
+): Promise<Array<PromiseSettledResult<Page>>> {
+  return Promise.allSettled(
+    urls.map((u) =>
+      fetchPage(u, FETCH_STORE_CEILING, domainProfile, false, undefined, fresh),
+    ),
+  );
+}
+
+const reasonOf = (s: PromiseRejectedResult) =>
+  s.reason instanceof Error ? s.reason.message : String(s.reason);
+
+function renderFullPages(
+  urls: string[],
+  pages: Map<string, PromiseSettledResult<Page>>,
+  budget: number,
+): string {
+  return urls
+    .map((u, i) => {
+      const head = `=== ${i + 1}/${urls.length} ===`;
+      const s = pages.get(u);
+      if (!s || s.status === "rejected") {
+        return `${head}\nURL: ${u}\nCould not fetch: ${s ? reasonOf(s) : "not fetched"}`;
+      }
+      const w = windowText(s.value.text, 0, budget, FETCH_STORE_CEILING);
+      return [
+        head,
+        `Title: ${s.value.title}`,
+        `URL: ${s.value.url}`,
+        "",
+        w.text,
+        w.footer ? `\n${w.footer}` : "",
+      ]
+        .join("\n")
+        .trimEnd();
+    })
+    .join("\n\n");
+}
+
+function buildSearchStructured(
+  meta: SearxMeta,
+  hits: RankedHit[],
+  queries: string[],
+  answer: { text: string; citations: Citation[] } | null,
+  answerUnavailable: string | null,
+) {
   return {
+    queries,
+    answer,
+    answer_unavailable: answerUnavailable,
     answers: meta.answers.map((a) => ({
       answer: a.answer,
       url: a.url ?? null,
@@ -218,339 +398,326 @@ function buildSearchStructured(meta: SearxMeta, results: SearxResult[]) {
     })),
     corrections: meta.corrections,
     suggestions: meta.suggestions,
-    results: results.map((r) => ({
+    results: hits.map(({ result: r, queryIndex, highlights }) => ({
       title: r.title,
       url: r.url,
       content: r.content ?? null,
+      published: r.publishedDate ?? null,
+      relevance: r.relevance ?? null,
+      engines: r.engines ?? (r.engine ? [r.engine] : []),
+      query_index: queryIndex,
+      highlights: highlights ?? [],
     })),
   };
 }
 
-export async function handleSearch({
-  query,
-  num_results,
-  category,
-  time_range,
-  domain_profile,
-  expand,
-  language,
-  engines,
-  site,
-  min_score,
-}: {
-  query: string;
-  num_results: number;
+export interface SearchArgs {
+  query: string | string[];
+  max_results: number;
+  content?: ContentMode;
+  answer?: boolean;
+  include_domains?: string | string[];
+  exclude_domains?: string | string[];
   category?: string;
   time_range?: string;
   domain_profile?: string;
   expand?: boolean;
   language?: string;
   engines?: string;
-  site?: string | string[];
   min_score?: number;
-}) {
+  fresh?: boolean;
+}
+
+export async function handleSearch(args: SearchArgs) {
+  const queries = toList(args.query).slice(0, MAX_QUERIES);
+  if (queries.length === 0) throw new Error("query must not be empty");
+  const {
+    max_results,
+    category,
+    time_range,
+    domain_profile,
+    expand,
+    language,
+    engines,
+    min_score,
+  } = args;
+  const content: ContentMode = args.content ?? "snippets";
+  const fresh = args.fresh ?? false;
+  const include = toList(args.include_domains);
+  const exclude = toList(args.exclude_domains);
+
   return instrumentSearchTool(
     "search",
-    { query, profile: domain_profile, expand, time_range, num_results },
-    async () => {
-      const { results: raw, meta } = await searxSearch(
-        query,
-        category ?? "general",
-        num_results,
-        time_range,
-        domain_profile,
-        expand,
-        language,
-        engines,
-        site,
-      );
-      const ranked = await rerankWithFallback(
-        query,
-        raw,
-        num_results,
-        time_range,
-        min_score,
-      );
-      return {
-        ranked,
-        rerankApplied: true,
-        result: {
-          content: [
-            {
-              type: "text" as const,
-              text: withMeta(meta, formatResults(ranked)),
-            },
-          ],
-          structuredContent: buildSearchStructured(meta, ranked),
-        },
-      };
-    },
-  );
-}
-
-export async function handleSearchAndFetch({
-  query,
-  category,
-  time_range,
-  fetch_count,
-  domain_profile,
-  expand,
-  language,
-  engines,
-  site,
-  min_score,
-}: {
-  query: string;
-  category?: string;
-  time_range?: string;
-  fetch_count: number;
-  domain_profile?: string;
-  expand?: boolean;
-  language?: string;
-  engines?: string;
-  site?: string | string[];
-  min_score?: number;
-}) {
-  return instrumentSearchTool(
-    "search_and_fetch",
     {
-      query,
+      query: queries.join(" | "),
       profile: domain_profile,
       expand,
       time_range,
-      num_results: fetch_count,
+      num_results: max_results,
     },
     async () => {
-      const { results: raw, meta } = await searxSearch(
-        query,
-        category ?? "general",
-        5,
-        time_range,
-        domain_profile,
-        expand,
-        language,
-        engines,
-        site,
+      const perQuery = await Promise.all(
+        queries.map(async (q) => {
+          const { results, meta } = await searxSearch(
+            q,
+            category ?? "general",
+            max_results,
+            time_range,
+            domain_profile,
+            expand,
+            language,
+            engines,
+            include.length > 0 ? include : undefined,
+            fresh,
+          );
+          const ranked = await rerankWithFallback(
+            q,
+            filterDomains(results, include, exclude),
+            max_results,
+            time_range,
+            min_score,
+          );
+          return { ranked, meta };
+        }),
       );
-      if (raw.length === 0) {
-        return {
-          ranked: [],
-          rerankApplied: false,
-          result: {
-            content: [
-              {
-                type: "text" as const,
-                text: withMeta(meta, "No results found."),
-              },
-            ],
-          },
-        };
-      }
-      const ranked = await rerankWithFallback(
-        query,
-        raw,
-        5,
-        time_range,
-        min_score,
-      );
-      const searchText = formatResults(ranked);
-      const maxCharsPerPage = Math.floor(8000 / fetch_count);
-      const toFetch = ranked.slice(0, fetch_count);
-      const fetched = await Promise.allSettled(
-        toFetch.map((r) => fetchPage(r.url, maxCharsPerPage, domain_profile)),
-      );
-      const fetchedSections = fetched
-        .map((result, i) => {
-          if (result.status === "fulfilled") {
-            const { title, text } = result.value;
-            return `\n\n--- Full content: ${title} ---\n${text}`;
-          }
-          const err =
-            result.reason instanceof Error
-              ? result.reason.message
-              : String(result.reason);
-          return `\n\n--- Could not fetch result ${i + 1}: ${err} ---`;
-        })
-        .join("");
-      return {
-        ranked,
-        rerankApplied: true,
-        result: {
-          content: [
-            {
-              type: "text" as const,
-              text: withMeta(meta, searchText + fetchedSections),
-            },
-          ],
-        },
-      };
-    },
-  );
-}
+      const hits = mergeHits(perQuery.map((p) => p.ranked));
+      const meta = mergeMeta(perQuery.map((p) => p.meta));
+      const ranked = hits.map((h) => h.result);
 
-export async function handleSearchAndSummarize({
-  query,
-  fetch_count,
-  category,
-  time_range,
-  domain_profile,
-  expand,
-  language,
-  engines,
-  site,
-  min_score,
-}: {
-  query: string;
-  fetch_count: number;
-  category?: string;
-  time_range?: string;
-  domain_profile?: string;
-  expand?: boolean;
-  language?: string;
-  engines?: string;
-  site?: string | string[];
-  min_score?: number;
-}) {
-  return instrumentSearchTool(
-    "search_and_summarize",
-    {
-      query,
-      profile: domain_profile,
-      expand,
-      time_range,
-      num_results: fetch_count,
-    },
-    async () => {
-      const { results: raw, meta } = await searxSearch(
-        query,
-        category ?? "general",
-        fetch_count + 2,
-        time_range,
-        domain_profile,
-        expand,
-        language,
-        engines,
-        site,
-      );
-      if (raw.length === 0) {
-        return {
-          ranked: [],
-          rerankApplied: false,
-          result: {
-            content: [
-              {
-                type: "text" as const,
-                text: withMeta(meta, "No results found."),
-              },
-            ],
-          },
-        };
-      }
-      const ranked = await rerankWithFallback(
-        query,
-        raw,
-        fetch_count,
-        time_range,
-        min_score,
-      );
-      const searchText = formatResults(ranked);
-      const toFetch = ranked.slice(0, fetch_count);
-      const fetched = await Promise.allSettled(
-        toFetch.map((r) => fetchPage(r.url, 4000, domain_profile, true)),
-      );
-      const successfulPages = fetched
-        .map((r) => (r.status === "fulfilled" ? r.value : null))
-        .filter(
-          (r): r is { title: string; url: string; text: string } => r !== null,
+      // Every page any option needs, fetched once, in parallel.
+      // A result the reranker scored as off-topic is not worth a page fetch:
+      // its passages would be noise, and the fetch is the slow part.
+      const top = (n: number) =>
+        ranked
+          .slice(0, n)
+          .filter((r) => r.relevance === undefined || r.relevance >= OFF_TOPIC)
+          .map((r) => r.url);
+      const need =
+        (content === "highlights" ? HIGHLIGHT_PAGES : 0) ||
+        (content === "full" ? FULL_PAGES : 0);
+      const wanted = [
+        ...new Set([...top(need), ...(args.answer ? top(ANSWER_PAGES) : [])]),
+      ];
+      const settled = await fetchPages(wanted, domain_profile, fresh);
+      const pages = new Map(wanted.map((u, i) => [u, settled[i]]));
+
+      if (content === "highlights") {
+        await Promise.all(
+          hits.slice(0, HIGHLIGHT_PAGES).map(async (h) => {
+            const s = pages.get(h.result.url);
+            if (s?.status !== "fulfilled") return;
+            const sel = await selectPassages(
+              queries[h.queryIndex],
+              s.value.text,
+              HIGHLIGHTS_PER_RESULT,
+            );
+            h.highlights = sel.passages.map((p) => ({
+              offset: p.offset,
+              text: p.text,
+              score: p.score,
+            }));
+          }),
         );
-      const summaryResult = await withSpan(
-        "summarize_llm",
-        { "summary.pages": successfulPages.length },
-        () => summarizePages(query, successfulPages),
-      );
-
-      if (!summaryResult.summary) {
-        const fetchedSections = fetched
-          .map((result, i) => {
-            if (result.status === "fulfilled") {
-              const { title, text } = result.value;
-              return `\n\n--- Full content: ${title} ---\n${text}`;
-            }
-            const err =
-              result.reason instanceof Error
-                ? result.reason.message
-                : String(result.reason);
-            return `\n\n--- Could not fetch result ${i + 1}: ${err} ---`;
-          })
-          .join("");
-        return {
-          ranked,
-          rerankApplied: true,
-          result: {
-            content: [
-              {
-                type: "text" as const,
-                text: withMeta(
-                  meta,
-                  `${formatSummaryFallbackNotice(summaryResult.failure)}\n\n${searchText}${fetchedSections}`,
-                ),
-              },
-            ],
-          },
-        };
       }
-      const output = formatSummaryResult(summaryResult);
+
+      // The answer. Synthesized from the top pages by the local LLM, with the
+      // same fallback contract the old search_and_summarize tool had: when it
+      // cannot be produced the response LEADS with the marker naming why, and
+      // carries the pages themselves so the caller still gets substance.
+      let answerText = "";
+      let answer: { text: string; citations: Citation[] } | null = null;
+      let answerUnavailable: string | null = null;
+      let fallbackPages = false;
+      if (args.answer) {
+        const okPages = top(ANSWER_PAGES)
+          .map((u) => pages.get(u))
+          .filter(
+            (s): s is PromiseFulfilledResult<Page> => s?.status === "fulfilled",
+          )
+          .map((s) => ({
+            ...s.value,
+            text: s.value.text.slice(0, ANSWER_PAGE_CHARS),
+          }));
+        const summary = await withSpan(
+          "summarize_llm",
+          { "summary.pages": okPages.length },
+          () => summarizePages(queries[0], okPages),
+        );
+        if (summary.summary) {
+          answer = { text: summary.summary, citations: summary.citations };
+          answerText = formatSummaryResult(summary);
+        } else {
+          answerText = formatSummaryFallbackNotice(summary.failure);
+          answerUnavailable = summary.failure
+            ? `${summary.failure.kind}: ${summary.failure.detail}`
+            : "unknown";
+          fallbackPages = content !== "full";
+        }
+      }
+
+      const sections = [
+        answerText,
+        formatMeta(meta),
+        formatHits(hits, queries),
+      ];
+      if (content === "full" && ranked.length > 0) {
+        sections.push(
+          renderFullPages(
+            top(FULL_PAGES),
+            pages,
+            Math.floor(FULL_TOTAL_CHARS / Math.min(FULL_PAGES, ranked.length)),
+          ),
+        );
+      } else if (fallbackPages && ranked.length > 0) {
+        const urls = top(ANSWER_PAGES);
+        sections.push(
+          renderFullPages(
+            urls,
+            pages,
+            Math.floor(FULL_TOTAL_CHARS / urls.length),
+          ),
+        );
+      }
+
       return {
         ranked,
-        rerankApplied: true,
+        rerankApplied: ranked.some((r) => r.relevance !== undefined),
         result: {
-          content: [{ type: "text" as const, text: withMeta(meta, output) }],
+          content: [
+            {
+              type: "text" as const,
+              text: sections.filter(Boolean).join("\n\n"),
+            },
+          ],
+          structuredContent: buildSearchStructured(
+            meta,
+            hits,
+            queries,
+            answer,
+            answerUnavailable,
+          ),
         },
       };
     },
   );
 }
 
-// Rough token→char conversion for the fetch_url token budget. Deliberately a
-// cheap heuristic (chars ≈ tokens × 4), not an exact tokenizer.
-const CHARS_PER_TOKEN = 4;
-const FETCH_DEFAULT_CHARS = 8000;
+// ── fetch_url ───────────────────────────────────────────────────────────────
 
-export async function handleFetchUrl({
-  url,
-  domain_profile,
-  max_tokens,
-  target_selector,
-  wait_for_selector,
-}: {
-  url: string;
+interface PageRequest {
+  maxChars: number;
+  offset: number;
+  find?: string;
+  query?: string;
+  domainProfile?: string;
+  tuning?: FetchTuning;
+  fresh: boolean;
+}
+
+/**
+ * One page, rendered for an agent: header, then the requested window, the
+ * passages matching `find`, or the passages most relevant to `query`, with a
+ * footer whenever a window is not the whole page. Reads the full stored text
+ * and windows it here, so paging a long page is a cache hit, not a refetch.
+ */
+async function renderPage(url: string, req: PageRequest): Promise<string> {
+  const page = await fetchPage(
+    url,
+    FETCH_STORE_CEILING,
+    req.domainProfile,
+    false,
+    req.tuning,
+    req.fresh,
+  );
+  const header = `Title: ${page.title}\nURL: ${page.url}`;
+  if (req.query) {
+    const sel = await selectPassages(req.query, page.text, QUERY_PASSAGES);
+    if (sel.passages.length === 0) {
+      return `${header}\n\n[page has no text to select passages from]`;
+    }
+    const how =
+      sel.scoredBy === "reranker"
+        ? "ranked by the local reranker"
+        : "ranked by term overlap — reranker unavailable";
+    const body = sel.passages
+      .map(
+        (p) =>
+          `--- offset ${p.offset} · score ${p.score.toFixed(2)} ---\n${p.text}`,
+      )
+      .join("\n\n");
+    return `${header}\n\n[${sel.passages.length} of ${sel.chunkCount} passages for "${req.query}", ${how}]\n\n${body}`;
+  }
+  if (req.find) {
+    const found = findPassages(page.text, req.find);
+    return `${header}\n\n${formatPassages(req.find, found, page.text.length)}`;
+  }
+  const w = windowText(
+    page.text,
+    req.offset,
+    req.maxChars,
+    FETCH_STORE_CEILING,
+  );
+  return [header, "", w.text, w.footer ? `\n${w.footer}` : ""]
+    .join("\n")
+    .trimEnd();
+}
+
+export interface FetchUrlArgs {
+  url: string | string[];
   domain_profile?: string;
   max_tokens?: number;
+  offset?: number;
+  find?: string;
+  query?: string;
   target_selector?: string;
   wait_for_selector?: string;
-}) {
+  fresh?: boolean;
+}
+
+export async function handleFetchUrl(args: FetchUrlArgs) {
   return instrumentTool("fetch_url", async () => {
-    const maxChars = max_tokens
-      ? max_tokens * CHARS_PER_TOKEN
-      : FETCH_DEFAULT_CHARS;
+    const urls = toList(args.url).slice(0, MAX_URLS);
+    if (urls.length === 0) throw new Error("url must not be empty");
     const tuning: FetchTuning | undefined =
-      target_selector || wait_for_selector
+      args.target_selector || args.wait_for_selector
         ? {
-            targetSelector: target_selector,
-            waitForSelector: wait_for_selector,
+            targetSelector: args.target_selector,
+            waitForSelector: args.wait_for_selector,
           }
         : undefined;
-    const {
-      title,
-      url: fetchedUrl,
-      text,
-    } = await fetchPage(url, maxChars, domain_profile, false, tuning);
-    const output = [`Title: ${title}`, `URL: ${fetchedUrl}`, "", text].join(
-      "\n",
+    const base = {
+      offset: args.offset ?? 0,
+      find: args.find?.trim() || undefined,
+      query: args.query?.trim() || undefined,
+      tuning,
+      fresh: args.fresh ?? false,
+      domainProfile: args.domain_profile,
+    };
+    const maxChars = args.max_tokens
+      ? args.max_tokens * CHARS_PER_TOKEN
+      : urls.length === 1
+        ? FETCH_DEFAULT_CHARS
+        : FETCH_MULTI_DEFAULT_CHARS;
+    if (urls.length === 1) {
+      const text = await renderPage(urls[0], { ...base, maxChars });
+      return { content: [{ type: "text" as const, text }] };
+    }
+    // Several pages in parallel; a failure costs its own section, not the call.
+    const settled = await Promise.allSettled(
+      urls.map((u) => renderPage(u, { ...base, maxChars })),
     );
-    return { content: [{ type: "text" as const, text: output }] };
+    const text = settled
+      .map((s, i) =>
+        s.status === "fulfilled"
+          ? `=== ${i + 1}/${urls.length} ===\n${s.value}`
+          : `=== ${i + 1}/${urls.length} ===\nURL: ${urls[i]}\nCould not fetch: ${reasonOf(s)}`,
+      )
+      .join("\n\n");
+    return { content: [{ type: "text" as const, text }] };
   });
 }
+
+// ── crawl_site / admin ──────────────────────────────────────────────────────
 
 export async function handleCrawlSite({
   url,
@@ -796,49 +963,66 @@ export async function handleDomainStats({ hostname }: { hostname?: string }) {
   });
 }
 
+// ── schemas ─────────────────────────────────────────────────────────────────
+//
+// Descriptions are budgeted. Every word here is paid for in every agent's
+// context on every turn, so each says what changes the caller's decision and
+// nothing else. The rationale lives in the code comments, not the schema.
+
+/**
+ * Advertised as an enum so an agent can see the valid names. Read once at
+ * registration: a profile added to domains.json later still works when named,
+ * it just is not advertised until the next session.
+ */
+function domainProfileSchema() {
+  const names = getProfileNames();
+  const base =
+    names.length > 0
+      ? z.enum(names as [string, ...string[]])
+      : z.string().max(0);
+  return base
+    .optional()
+    .describe("Domain profile: boosts and blocks a set of sites");
+}
+
+const QuerySchema = z
+  .union([
+    z.string().min(1),
+    z.array(z.string().min(1)).min(1).max(MAX_QUERIES),
+  ])
+  .describe(
+    `Search query, or up to ${MAX_QUERIES} phrasings of one question (run in parallel, merged, duplicates dropped). Specific keyword-rich queries work best.`,
+  );
+
 const LanguageSchema = z
   .string()
   .optional()
-  .describe(
-    "BCP-47 language code (e.g. 'en', 'de') or 'all' for all languages. Omit to use the SearXNG instance default.",
-  );
+  .describe("BCP-47 code like 'en', or 'all'");
 
 const EnginesSchema = z
   .string()
   .optional()
-  .describe(
-    "Comma-separated SearXNG engine names to restrict the search to (e.g. 'google,duckduckgo'). Forwarded verbatim; unknown/disabled engines degrade to fewer results rather than erroring.",
-  );
+  .describe("Comma-separated SearXNG engines to restrict to; omit normally");
 
-const SiteSchema = z
-  .union([z.string(), z.array(z.string())])
+const DomainListSchema = (what: string) =>
+  z
+    .union([z.string(), z.array(z.string()).max(50)])
+    .optional()
+    .describe(what);
+
+const FreshSchema = z.coerce
+  .boolean()
   .optional()
-  .describe(
-    "Restrict results to one domain or a list of domains (e.g. 'github.com'). Best-effort — applied as a site: query operator; most engines honor it but some ignore it.",
-  );
+  .describe("Bypass the cache for this call (search 1h, pages 24h)");
 
 /**
- * `min_score` — a relevance floor applied after reranking.
- *
- * The description is long on purpose. Three things about this parameter are
- * counter-intuitive enough that omitting them would make it actively
- * misleading, and all three were measured against the live FlashRank service
- * rather than assumed:
- *
- * 1. WHICH SCORE. `rerank()` sorts on `relevance_score + RERANK_RECENCY_WEIGHT
- *    * recencyScore(...)`, which with the default weight of 0.15 ranges over
- *    0..1.15, not 0..1. This filters on the RAW `relevance_score`, so a recent
- *    but irrelevant document cannot be pushed past the floor.
- *
- * 2. THE DISTRIBUTION IS BIMODAL, so the knob is far less sensitive than a
- *    0..1 range suggests. Measured on "how to configure nginx reverse proxy":
- *    nginx reverse-proxy guide 0.998, Apache mod_proxy 0.967, nginx install
- *    page 0.0028, banana bread recipe 0.0000151. Anything in roughly 0.01..0.9
- *    behaves near-identically. 0.5 is NOT a meaningful midpoint.
- *
- * 3. A HIGH SCORE MEANS TOPICALLY RELATED, NOT CORRECT. The Apache document
- *    scored 0.967 on an nginx query. This is a topicality floor and cannot be
- *    trusted as a correctness filter.
+ * `min_score` filters on the RAW cross-encoder relevance, not the
+ * recency-adjusted ordering score, so a recent but irrelevant result cannot be
+ * pushed past the floor. Scores measured against the live FlashRank service are
+ * strongly bimodal (nginx reverse-proxy guide 0.998, Apache mod_proxy 0.967,
+ * nginx install page 0.0028), so 0.01–0.1 is the useful range and 0.5 is not a
+ * midpoint — and a high score means on-topic, not correct. No-op (with a
+ * logged warning) when the reranker is down.
  */
 const MinScoreSchema = z.coerce
   .number()
@@ -846,18 +1030,24 @@ const MinScoreSchema = z.coerce
   .max(1)
   .optional()
   .describe(
-    "Drop results whose reranker relevance score is below this threshold (0-1, omit for no filtering). " +
-      "Filters on the RAW cross-encoder relevance score, not the recency-adjusted score used for ordering. " +
-      "Scores are strongly bimodal — relevant results cluster near 1.0 and irrelevant ones near 0, with little in between — so any value in roughly 0.01-0.9 behaves about the same; 0.01-0.1 is the useful range and 0.5 is not a midpoint. " +
-      "A high score means topically related, NOT correct: an Apache mod_proxy page scores 0.967 on an nginx query. " +
-      "Thresholds are model-dependent and not comparable across rerankers. " +
-      "No-op (with a logged warning) when the reranker is unavailable, since no scores exist to filter on.",
+    "Drop results below this reranker relevance (the 'rel' shown). Scores are bimodal: 0.01-0.1 is the useful range. High = on-topic, not correct",
   );
 
-// Output schema for the `search` tool — surfaces SearXNG's native answers /
-// infoboxes / corrections / suggestions alongside a minimal result list so
-// callers can check for a direct answer programmatically.
 const SearchOutputSchema = z.object({
+  queries: z.array(z.string()),
+  answer: z
+    .object({
+      text: z.string(),
+      citations: z.array(
+        z.object({
+          url: z.string(),
+          title: z.string(),
+          key_facts: z.array(z.string()),
+        }),
+      ),
+    })
+    .nullable(),
+  answer_unavailable: z.string().nullable(),
   answers: z.array(
     z.object({ answer: z.string(), url: z.string().nullable() }),
   ),
@@ -875,195 +1065,192 @@ const SearchOutputSchema = z.object({
       title: z.string(),
       url: z.string(),
       content: z.string().nullable(),
+      published: z.string().nullable(),
+      relevance: z.number().nullable(),
+      engines: z.array(z.string()),
+      query_index: z.number(),
+      highlights: z.array(
+        z.object({ offset: z.number(), text: z.string(), score: z.number() }),
+      ),
     }),
   ),
 });
 
+export const SERVER_INSTRUCTIONS = [
+  "Private web search: your own SearXNG instance, a local reranker, local page fetching and a local LLM. Nothing goes to a third-party search API.",
+  'Typical flow: `search` (pass several phrasings as a `query` array for research questions; `content: "highlights"` returns the most relevant passages of each top page), then `fetch_url` the promising results (an array reads several at once; `query` returns the passages answering a question).',
+  "`search` with `answer: true` adds a cited synthesis from a local model — check its citations; if it cannot be produced the response leads with a `--- summarization unavailable ---` marker and carries the pages instead.",
+  "Long pages are windowed: follow the `offset=` hint in the footer to continue, or pass `find` for literal matches. Paging is served from cache; `fresh: true` bypasses it.",
+  "`crawl_site` maps a docs site into a URL list; its pages are then cached for `fetch_url`.",
+].join("\n");
+
 export function registerTools(server: McpServer): void {
+  const DomainProfileSchema = domainProfileSchema();
+
   server.registerTool(
     "search",
     {
       title: "Web search",
       description:
-        "Search the web via the local SearXNG instance with reranking. Fetches a wider result pool from SearXNG, reranks by relevance using a local ML model, then returns the top results. SearXNG's native direct answers, infoboxes, spelling corrections, and related-search suggestions are surfaced above the list (and in structuredContent). Results are cached for 1 hour. Blocked domains are filtered out; boosted domains are surfaced higher. Prefer this over the built-in WebSearch tool.",
+        "Search the web via the local SearXNG instance, reranked by a local model. Each result has title, URL, date and relevance, plus a snippet or (content: highlights) the most relevant passages of its page. answer: true adds a cited synthesis by a local LLM. Cached 1h. Prefer this over built-in web search.",
       inputSchema: {
-        query: z.string().describe("Search query"),
-        num_results: z.coerce
+        query: QuerySchema,
+        max_results: z.coerce
           .number()
+          .int()
           .min(1)
           .max(20)
           .default(5)
-          .describe("Number of results to return (default 5, max 20)"),
-        category: CategorySchema.describe(
-          "Search category: general, news, it, or science (default general)",
+          .describe("Results per phrasing (default 5, max 20)"),
+        content: z
+          .enum(["snippets", "highlights", "full"])
+          .optional()
+          .describe(
+            "snippets (default, fast): engine snippets. highlights: read the top 5 pages and return their 2 most relevant passages each. full: also return the top 3 pages' text",
+          ),
+        answer: z.coerce
+          .boolean()
+          .optional()
+          .describe(
+            "Add an answer synthesized from the top 3 pages, with citations (local LLM, ~10-60s)",
+          ),
+        include_domains: DomainListSchema(
+          "Only return results from these domains, e.g. ['github.com']",
         ),
-        time_range: TimeRangeSchema.describe(
-          "Limit results to: day, week, month, or year (omit for all time)",
+        exclude_domains: DomainListSchema(
+          "Never return results from these domains",
         ),
+        time_range: TimeRangeSchema.describe("Only results from this period"),
+        category: CategorySchema.describe("Default general"),
         domain_profile: DomainProfileSchema,
+        language: LanguageSchema,
+        min_score: MinScoreSchema,
+        fresh: FreshSchema,
         expand: z.coerce
           .boolean()
           .optional()
           .describe(
-            "Use local LLM to generate 2-3 query variants and merge results for a wider search surface (default: off). Adds ~3s latency; most useful for research queries where one phrasing may miss relevant results.",
+            "Have the local LLM add query variants (~3s); passing your own phrasings in query is usually better",
           ),
-        language: LanguageSchema,
         engines: EnginesSchema,
-        site: SiteSchema,
-        min_score: MinScoreSchema,
       },
       outputSchema: SearchOutputSchema,
     },
     handleSearch,
   );
 
-  server.tool(
-    "search_and_fetch",
-    "Search the web, rerank results, then fetch the full content of the top result(s). GitHub URLs are fetched via the GitHub API; all others go through a fetch cascade: Crawl4AI → raw HTTP. Results and fetched pages are cached. Blocked domains are filtered. Returns the result list plus clean markdown of the fetched pages.",
-    {
-      query: z.string().describe("Search query"),
-      category: CategorySchema.describe(
-        "Search category: general, news, it, or science (default general)",
-      ),
-      time_range: TimeRangeSchema.describe(
-        "Limit results to: day, week, month, or year (omit for all time)",
-      ),
-      fetch_count: z.coerce
-        .number()
-        .min(1)
-        .max(3)
-        .default(1)
-        .describe(
-          "Number of top results to fetch full content for (default 1, max 3)",
-        ),
-      domain_profile: DomainProfileSchema,
-      expand: z.coerce
-        .boolean()
-        .optional()
-        .describe(
-          "Use local LLM to generate 2-3 query variants and merge results for a wider search surface (default: off). Adds ~3s latency.",
-        ),
-      language: LanguageSchema,
-      engines: EnginesSchema,
-      site: SiteSchema,
-      min_score: MinScoreSchema,
-    },
-    handleSearchAndFetch,
-  );
-
-  server.tool(
+  server.registerTool(
     "fetch_url",
-    "Fetch and extract readable content from any URL. GitHub URLs are fetched via the GitHub API; all others go through a fetch cascade: Crawl4AI → raw HTTP. Returns clean markdown where possible. Content is trimmed to a token budget (default ~2000 tokens / 8000 chars; raise with max_tokens). Results cached for 24 hours. Blocked domains and private/internal addresses are refused.",
     {
-      url: z.string().url().describe("URL to fetch and extract content from"),
-      domain_profile: DomainProfileSchema,
-      max_tokens: z.coerce
-        .number()
-        .int()
-        .min(100)
-        .max(10000)
-        .optional()
-        .describe(
-          "Approximate token budget for the returned content (chars ≈ tokens × 4). Omit for the ~2000-token / 8000-char default; max 10000 tokens.",
-        ),
-      target_selector: z
-        .string()
-        .max(500)
-        .optional()
-        .describe(
-          "CSS selector to scope extraction to a specific element (e.g. 'article', 'main .content'). Honored by Crawl4AI and applied client-side on the raw-HTTP tier; ignored by fast paths and if it matches nothing.",
-        ),
-      wait_for_selector: z
-        .string()
-        .max(500)
-        .optional()
-        .describe(
-          "CSS selector to wait for before extracting, for JS-rendered pages. Honored by the rendering tier (Crawl4AI); ignored on raw HTTP (no JS).",
-        ),
+      title: "Fetch URL",
+      description:
+        "Read public URLs as markdown (PDFs included). GitHub files/repos/releases come from the GitHub API; YouTube and Reddit have fast paths; other pages go Crawl4AI (headless browser) then raw HTTP. Returns a window of the page with a footer saying how to continue; `query` or `find` return passages instead. Cached 24h.",
+      inputSchema: {
+        url: z
+          .union([
+            z.string().url(),
+            z.array(z.string().url()).min(1).max(MAX_URLS),
+          ])
+          .describe(`http(s) URL, or up to ${MAX_URLS} URLs read in parallel`),
+        max_tokens: z.coerce
+          .number()
+          .int()
+          .min(100)
+          .max(10000)
+          .optional()
+          .describe(
+            "Approx tokens to return per page (default 2000; 1000 each when several URLs)",
+          ),
+        offset: z.coerce
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Character offset to start from, as given in the footer"),
+        query: z
+          .string()
+          .max(500)
+          .optional()
+          .describe(
+            "Return the page's 5 passages most relevant to this question (local reranker) instead of the page head",
+          ),
+        find: z
+          .string()
+          .max(500)
+          .optional()
+          .describe(
+            "Return passages around literal case-insensitive matches; '|' separates alternatives",
+          ),
+        fresh: FreshSchema,
+        domain_profile: DomainProfileSchema,
+        target_selector: z
+          .string()
+          .max(500)
+          .optional()
+          .describe("CSS selector to scope extraction, e.g. 'article'"),
+        wait_for_selector: z
+          .string()
+          .max(500)
+          .optional()
+          .describe("CSS selector to wait for on JS-rendered pages"),
+      },
     },
     handleFetchUrl,
   );
 
-  server.tool(
-    "search_and_summarize",
-    "Search, rerank, fetch top results, then synthesize a summary with citations using a local LLM (`OLLAMA_SUMMARIZE_MODEL`). Returns a structured answer with source attribution. If the LLM is unavailable it falls back to raw fetched content, and that fallback is always announced by a leading '--- summarization unavailable (<kind>: <detail>) --- ' marker: if you do not see that marker, what you received is a real synthesis. Best for deep research where you want pre-digested synthesis rather than raw pages.",
-    {
-      query: z.string().describe("Research query to search for and summarize"),
-      fetch_count: z.coerce
-        .number()
-        .min(1)
-        .max(5)
-        .default(3)
-        .describe(
-          "Number of top results to fetch and synthesize (default 3, max 5)",
-        ),
-      category: CategorySchema.describe(
-        "Search category: general, news, it, or science (default general)",
-      ),
-      time_range: TimeRangeSchema.describe(
-        "Limit results to: day, week, month, or year (omit for all time)",
-      ),
-      domain_profile: DomainProfileSchema,
-      expand: z.coerce
-        .boolean()
-        .optional()
-        .describe("Use query expansion before searching (default: off)"),
-      language: LanguageSchema,
-      engines: EnginesSchema,
-      site: SiteSchema,
-      min_score: MinScoreSchema,
-    },
-    handleSearchAndSummarize,
-  );
-
-  server.tool(
+  server.registerTool(
     "crawl_site",
-    "Crawl a site and return a manifest of pages with titles and snippets. " +
-      "Full page content is cached — call fetch_url on any page URL for the full text. " +
-      "Strategy: sitemap-first → BFS (if enabled). " +
-      "A start URL with a path (e.g. https://example.com/docs) limits the crawl to pages under that path " +
-      "unless include_path is given; include_path '/' crawls the whole site.",
     {
-      url: z
-        .string()
-        .url()
-        .describe(
-          "Base URL to crawl. Its path scopes the crawl when include_path is omitted",
-        ),
-      max_pages: z.coerce
-        .number()
-        .min(1)
-        .max(100)
-        .default(20)
-        .describe("Maximum pages to crawl (default 20, max 100)"),
-      same_domain_only: z.coerce
-        .boolean()
-        .default(true)
-        .describe("Restrict crawl to the same domain (default true)"),
-      include_path: z
-        .string()
-        .optional()
-        .describe(
-          "Only include URLs matching this path prefix (e.g. '/docs'); replaces the start URL's default scope, '/' for the whole site",
-        ),
-      exclude_path: z
-        .string()
-        .optional()
-        .describe("Exclude URLs matching this path prefix (e.g. '/blog')"),
+      title: "Crawl site",
+      description:
+        "Map a site (sitemap, else link-following if enabled) into a URL/title/snippet list; pages are cached for fetch_url. A start URL with a path stays under it; include_path '/' crawls the whole site.",
+      inputSchema: {
+        url: z.string().url().describe("Site root or docs URL"),
+        max_pages: z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .default(20)
+          .describe("Page cap (default 20)"),
+        same_domain_only: z.coerce
+          .boolean()
+          .default(true)
+          .describe("Stay on the start domain (default true)"),
+        include_path: z
+          .string()
+          .optional()
+          .describe(
+            "Only URLs under this path prefix; replaces the default scope",
+          ),
+        exclude_path: z
+          .string()
+          .optional()
+          .describe("Skip URLs under this path prefix"),
+      },
     },
     handleCrawlSite,
   );
 
-  server.tool(
+  // Operator tools. Off by default: clear_cache wipes cache shared by every
+  // agent on the box, and domain_stats is a diagnostic an agent mid-task has no
+  // use for — together they were ~5k chars of schema in every agent's context.
+  // The same data is available to operators through the config/stats MCP
+  // resources and the dump-domain CLI.
+  if (!ADMIN_TOOLS_ENABLED) return;
+
+  server.registerTool(
     "clear_cache",
-    "Purge the search and/or fetch result cache. Useful when researching fast-moving topics where cached results from the past hour may be stale.",
     {
-      target: z
-        .enum(["search", "fetch", "crawl", "all"])
-        .default("all")
-        .describe(
-          "Which cache to clear: search results, fetched pages, crawl manifests, or all (default all)",
-        ),
+      title: "Clear cache",
+      description:
+        "Purge cached search results (1h), fetched pages (24h) and/or crawl manifests.",
+      inputSchema: {
+        target: z
+          .enum(["search", "fetch", "crawl", "all"])
+          .default("all")
+          .describe("Which cache (default all)"),
+      },
     },
     handleClearCache,
   );
@@ -1073,13 +1260,13 @@ export function registerTools(server: McpServer): void {
     {
       title: "Domain capability stats",
       description:
-        "Read the searxng-mcp domain capability database — what it has learned about hosts from fetches: per-tier success rates (tier2 crawl4ai, tier3 raw, tier4 wayback, github fast path, solver), llms.txt/robots presence, metadata reachability, and search appearances. Provide `hostname` for one domain's record, or omit it for an aggregate across all tracked domains (per-tier success rates, worst failing domains, seen-but-never-fetched count). Read-only. Aggregate mode reports `truncated: true` if the internal scan cap is hit.",
+        "What the fetcher has learned about a host: per-tier success rates (tier2 crawl4ai, tier3 raw, tier4 wayback, github fast path, solver), llms.txt/robots presence, search appearances. Omit hostname for an aggregate. Read-only.",
       inputSchema: {
         hostname: z
           .string()
           .optional()
           .describe(
-            "Hostname or URL to look up (e.g. 'docs.anthropic.com'). Omit for an aggregate over all tracked domains.",
+            "Hostname or URL, e.g. 'docs.python.org'; omit for aggregate",
           ),
       },
       outputSchema: DomainStatsOutputSchema,

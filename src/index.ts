@@ -15,7 +15,7 @@ import { createHttpRequestListener } from "./http-transport.js";
 import { logError, logWarn } from "./log.js";
 import { initObservability, shutdownObservability } from "./observability.js";
 import { registerResources } from "./resources.js";
-import { registerTools } from "./tools.js";
+import { registerTools, SERVER_INSTRUCTIONS } from "./tools.js";
 import { VERSION } from "./version.js";
 
 // This is a single long-lived HTTP process serving all agents. Before these
@@ -53,13 +53,13 @@ await initEvents();
 logCapabilities();
 
 const createSearxngServer = () => {
-  const server = new McpServer({
-    name: "private-search-4-agents",
-    version: VERSION,
-  });
+  const server = new McpServer(
+    { name: "private-search-4-agents", version: VERSION },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
   registerTools(server);
-  // Additive: the seven tools are unchanged. Note these are NOT visible through
-  // scoped-mcp, which proxies tools only — see the header of resources.ts.
+  // Note these are NOT visible through scoped-mcp, which proxies tools only —
+  // see the header of resources.ts.
   registerResources(server);
   return server;
 };
