@@ -133,17 +133,25 @@ describe("domain_stats advertised output schema", () => {
     // #637 broke `single` and `aggregate` simultaneously because they share
     // this one node. If a future change gives them separate definitions, the
     // single-definition assumption the rest of this file rests on is void.
-    const aggregateTiers = (
+    const props = (
       ADVERTISED_SCHEMA as unknown as {
         properties: {
           aggregate: { anyOf: [{ properties: { tiers: { $ref?: string } } }] };
         };
       }
-    ).properties.aggregate.anyOf[0].properties.tiers;
+    ).properties;
+    const aggregateTiers = props.aggregate.anyOf[0].properties.tiers;
 
-    expect(aggregateTiers.$ref).toBe(
-      "#/properties/record/anyOf/0/properties/tiers",
-    );
+    // zod 3's converter deduplicated the shared node into a $ref; zod 4's
+    // inlines it. Either is one definition — what must not happen is the two
+    // modes advertising different shapes.
+    if (aggregateTiers.$ref !== undefined) {
+      expect(aggregateTiers.$ref).toBe(
+        "#/properties/record/anyOf/0/properties/tiers",
+      );
+    } else {
+      expect(aggregateTiers).toEqual(advertisedTiers());
+    }
   });
 
   it("keeps additionalProperties:false — the strictness that makes this suite meaningful", () => {
