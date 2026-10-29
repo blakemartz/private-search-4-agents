@@ -114,7 +114,7 @@ corrections and suggestions as separate fields rather than as one concatenated s
 
 ### The three that actually mattered
 
-**PDFs.** This is the one real loss. `searxng-mcp` cannot extract PDF text and says so: the PDF
+**PDFs.** This is the one real loss (since restored locally — see "If PDFs come back" below). `searxng-mcp` cannot extract PDF text and says so: the PDF
 fast path was deliberately removed (`src/fetch.ts:523`), Firecrawl is the only tier that can do it
 and it is stopped here, v1 has no PDF support (`src/firecrawl-api.ts:82-83`), and Crawl4AI renders
 the PDF in a browser, finds no text nodes, and misfires its anti-bot heuristic — so tier 3 rejects
@@ -185,6 +185,10 @@ Nothing reads it now. Before deleting it, confirm `crawl4aiApiToken` is present 
 `~/dev/websearch/.env.searxng-mcp` — that is the token tier 2 actually uses.
 
 ## If PDFs come back
+
+> **Done (option 2), 2026-10-28.** `src/pdf.ts` is a `unpdf` fast path ahead of the cascade —
+> see [PDF fast path](architecture.md#pdf-fast-path). The rest of this section is kept as the
+> record of the options weighed.
 
 In rough order of effort:
 

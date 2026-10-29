@@ -8,6 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/config.js", () => ({
   FETCH_CACHE_TTL_SECONDS: 86400,
+  PDF_EXTRACT_ENABLED: true,
+  PDF_MAX_BYTES: 20 * 1024 * 1024,
+  PDF_MAX_PAGES: 50,
   WAYBACK_ENABLED: false,
   YOUTUBE_TRANSCRIPT_ENABLED: false,
   YOUTUBE_IGNORE_ROBOTS: false,
@@ -81,7 +84,7 @@ vi.mock("../src/llms-txt.js", () => ({
 }));
 
 vi.mock("../src/content-type.js", () => ({
-  probeStructuredContent: vi.fn().mockResolvedValue(null),
+  probeContentKind: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("../src/extractors/post-extract.js", () => ({
@@ -121,12 +124,12 @@ vi.mock("../src/tiers/index.js", () => ({
   waybackFetch: vi.fn().mockResolvedValue(null),
 }));
 
-import { probeStructuredContent } from "../src/content-type.js";
+import { probeContentKind } from "../src/content-type.js";
 import { recordTierAttempt } from "../src/domain-db.js";
 import { fetchPage } from "../src/fetch.js";
 import { rawFetch } from "../src/tiers/index.js";
 
-const probeMock = vi.mocked(probeStructuredContent);
+const probeMock = vi.mocked(probeContentKind);
 const rawFetchMock = vi.mocked(rawFetch);
 const recordTierAttemptMock = vi.mocked(recordTierAttempt);
 

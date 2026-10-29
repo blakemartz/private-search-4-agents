@@ -94,15 +94,19 @@ export async function rawFetch(
   // Placed after the challenge check, so a Cloudflare interstitial mislabelled
   // as a PDF is still booked as `challenge_detected` and can reach the solver.
   //
-  // The message names the actual cause. It used to read "use Crawl4AI", which
-  // was wrong: Crawl4AI cannot parse PDFs either, and no tier in this build
-  // does, so no amount of config will change it (vikunja#682).
+  // PDFs are read by the local PDF path in fetchPage (src/pdf.ts), ahead of
+  // the cascade, so a real PDF reaches this line only when that path was
+  // skipped (PDF_EXTRACT_ENABLED=false, or an extensionless PDF whose HEAD
+  // probe failed) or failed (oversize, parse error — its reason is listed as
+  // pdf_local in the same error). The message names that, rather than the old
+  // "no tier parses PDF text", which stopped being true. This body was read
+  // as UTF-8 text, so it cannot be handed to the PDF parser from here.
   if (
     res.headers.get("content-type")?.includes("application/pdf") &&
     body.startsWith("%PDF-")
   ) {
     throw new Error(
-      "PDF content cannot be extracted — no tier in this build parses PDF text",
+      "PDF content cannot be extracted by raw fetch — the local PDF path was skipped or failed (see pdf_local, PDF_EXTRACT_ENABLED, PDF_MAX_BYTES)",
     );
   }
 

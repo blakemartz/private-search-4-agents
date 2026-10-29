@@ -322,6 +322,14 @@ export const YOUTUBE_IGNORE_ROBOTS =
 export const REDDIT_FASTPATH_ENABLED =
   process.env.REDDIT_FASTPATH_ENABLED !== "false";
 export const REDDIT_IGNORE_ROBOTS = process.env.REDDIT_IGNORE_ROBOTS === "true";
+// Local PDF text extraction (src/pdf.ts, via unpdf/pdf.js). In-process and
+// keyless, so it defaults on; PDF_EXTRACT_ENABLED=false is the kill switch and
+// sends PDFs back through the ordinary cascade, which cannot extract them.
+// PDF_MAX_BYTES bounds the body read into memory (a PDF must be held whole to
+// parse); PDF_MAX_PAGES bounds the CPU spent walking pages.
+export const PDF_EXTRACT_ENABLED = process.env.PDF_EXTRACT_ENABLED !== "false";
+export const PDF_MAX_BYTES = positiveIntEnv("PDF_MAX_BYTES", 20 * 1024 * 1024);
+export const PDF_MAX_PAGES = positiveIntEnv("PDF_MAX_PAGES", 50);
 export const TRANSPORT = process.env.SEARXNG_MCP_TRANSPORT ?? "stdio"; // "stdio" | "http"
 export const HTTP_PORT = parseInt(process.env.SEARXNG_MCP_PORT ?? "3001", 10);
 export const HTTP_HOST = process.env.SEARXNG_MCP_HOST ?? "127.0.0.1";

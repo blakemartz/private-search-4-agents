@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **PDF text extraction is back, locally.** Removing Firecrawl left no tier that could read a
+  PDF: Crawl4AI renders it in a browser and finds no text, and tier 3 rejected it. A new fast
+  path (`src/pdf.ts`) extracts PDF text in-process with `unpdf` — keyless, no service. It takes
+  `.pdf` URLs directly and finds extensionless PDFs (`arxiv.org/pdf/<id>`) by the existing
+  `HEAD` probe's `Content-Type`; runs after the robots gate and SSRF pre-check, fetches through
+  `safeFetch` with each redirect hop re-checked; reads the body as bytes under `PDF_MAX_BYTES`
+  (20 MB) and walks at most `PDF_MAX_PAGES` (50) pages, stopping once the store size is filled.
+  Text comes back page-marked (`--- page N ---`) under the PDF's title. Failures fall through to
+  the cascade, except a PDF with no text layer (scanned) or a password, which is reported as
+  such. Recorded as `pdf_local` in a new domain-db `pdf` slot — added **without** a schema bump;
+  older schema-7 records read it as empty and gain it on their next write.
+  `PDF_EXTRACT_ENABLED=false` is the kill switch; the startup line now reports `pdf` as `on`.
+
 ### Fixed
 
 - **Readability output was glued plain text, not markdown.** Whenever Readability won in tier 2

@@ -127,7 +127,24 @@ function fenceWidthFor(body: string): number {
 }
 
 /**
- * HEAD-probe a URL to decide whether it serves structured data.
+ * What a HEAD probe can divert: a structured payload (raw fetch + fence) or a
+ * PDF (local extraction, src/pdf.ts). Neither wants a headless browser.
+ */
+export type ProbedKind = StructuredKind | "pdf";
+
+/** Whether a Content-Type header declares a PDF. */
+export function isPdfContentType(header: string | null | undefined): boolean {
+  const mime = header?.split(";")[0]?.trim().toLowerCase();
+  return mime === "application/pdf" || mime === "application/x-pdf";
+}
+
+/**
+ * HEAD-probe a URL to decide whether it serves structured data or a PDF.
+ *
+ * One probe answers both questions, so an HTML page pays a single HEAD however
+ * many non-HTML kinds are diverted. PDF is recognised here rather than in
+ * classifyContentType because that function also decides how raw.ts renders a
+ * body, and a PDF is not something it can render.
  *
  * Fails open: any error, timeout, non-OK status, or server that refuses HEAD
  * returns null and the caller runs its normal cascade. A probe that cannot
@@ -137,9 +154,9 @@ function fenceWidthFor(body: string): number {
  * string-level guard and the DNS-validating dispatcher, but the ordering keeps
  * this consistent with the other pre-cascade dispatches.
  */
-export async function probeStructuredContent(
+export async function probeContentKind(
   url: string,
-): Promise<StructuredKind | null> {
+): Promise<ProbedKind | null> {
   try {
     const res = await safeFetch(url, {
       method: "HEAD",
@@ -150,7 +167,9 @@ export async function probeStructuredContent(
     // A redirect tells us nothing about the final body's type, and following it
     // here would sidestep the redirect handling the tiers already do.
     if (!res.ok) return null;
-    return classifyContentType(res.headers.get("content-type"));
+    const contentType = res.headers.get("content-type");
+    if (isPdfContentType(contentType)) return "pdf";
+    return classifyContentType(contentType);
   } catch {
     // Reviewed (vikunja#687 class sweep): a best-effort HEAD probe whose null
     // means "no structured-content fast path", routing to the normal cascade.

@@ -15,6 +15,7 @@ MCP client (stdio)
       ├── fetch content ────┬→ GitHub API (github.com)    → markdown
       │                     ├→ Kiwix ($KIWIX_URL)         → ZIM content (Wikipedia/SO/Arch Wiki, fast path)
       │                     ├→ Hister ($HISTER_URL)       → browsing-history index (login-walled/JS-heavy fast path)
+      │                     ├→ Local PDF (unpdf)         → page-marked PDF text (in-process; .pdf path or application/pdf)
       │                     ├→ Crawl4AI ($CRAWL4AI_URL)  → page markdown (tier 2, first tier; optional, direct — no proxy, see below)
       │                     ├→ Raw HTTP + Readability     → page markdown (tier 3 fallback; via $ADBLOCK_PROXY_URL if set)
       │                     ├→ Byparr solver (opt-in)     → challenge-solved page markdown (only on a detected challenge, $SOLVER_ENABLED)
@@ -36,6 +37,8 @@ flowchart TD
     kiwix{"Kiwix host?\nKIWIX_URL set"}
     kiwix_fetch["Local Kiwix ZIM\nWikipedia · Stack Overflow · Arch Wiki\n→ cache + return"]
     robots["robots.txt pre-check — tiers 2–3\ndisallowed → RobotsDisallowedError (cached 24h)"]
+    pdf{"PDF?\n.pdf path, or HEAD says application/pdf"}
+    pdf_fetch["Local PDF extraction — unpdf, in-process\npage-marked text · PDF_EXTRACT_ENABLED\n→ cache + return"]
     tier_skip(["Per-domain tier skip\nsuccess rate &lt;30% over ≥10 tries\nor tier_skip operator override"])
     t2["Tier 2 — Crawl4AI\n$CRAWL4AI_URL · optional\ndirect — no adblock proxy"]
     t3["Tier 3 — Raw HTTP + Readability\nfallback: raw HTML slice\nadblock proxy if $ADBLOCK_PROXY_URL"]
@@ -54,7 +57,10 @@ flowchart TD
     llms -->|no| kiwix
     kiwix -->|yes| kiwix_fetch
     kiwix -->|no| robots
-    robots --> tier_skip
+    robots --> pdf
+    pdf -->|yes| pdf_fetch
+    pdf -->|no| tier_skip
+    pdf_fetch -->|"miss / error\n(not: no text layer)"| tier_skip
     tier_skip --> t2
     t2 -->|success| post
     t2 -->|"empty / error"| t3
@@ -77,6 +83,8 @@ flowchart TD
     style kiwix fill:#fff9c4,stroke:#b8860b,color:#000000
     style kiwix_fetch fill:#fff9c4,stroke:#b8860b,color:#000000
     style robots fill:#ffffff,stroke:#333333,color:#000000
+    style pdf fill:#dae8fc,stroke:#6c8ebf,color:#000000
+    style pdf_fetch fill:#dae8fc,stroke:#6c8ebf,color:#000000
     style tier_skip fill:#f5f5f5,stroke:#666666,color:#000000
     style t2 fill:#d5e8d4,stroke:#5a8a4a,color:#000000
     style t3 fill:#d5e8d4,stroke:#5a8a4a,color:#000000
@@ -91,7 +99,7 @@ flowchart TD
 
 **There is no tier 1.** It was Firecrawl, removed in this fork; the cascade starts at Crawl4AI. The slot names `tier2`/`tier3` were deliberately not renumbered, because they are persisted in domain-db records and in `tier_skip` config.
 
-**PDFs are not extracted.** No tier in this build parses PDF text; a PDF URL fails at tier 3 with `PDF content cannot be extracted — no tier in this build parses PDF text`.
+**PDFs are extracted locally, ahead of the cascade.** No cascade tier reads PDFs (Crawl4AI renders them in a browser and finds no text; tier 3 reads bodies as text), so a PDF fast path does — see [PDF fast path](#pdf-fast-path). A PDF reaching tier 3 means that path was skipped or failed, and tier 3 says so: `PDF content cannot be extracted by raw fetch — the local PDF path was skipped or failed`.
 
 ## Adblocking
 
@@ -130,6 +138,18 @@ Before invoking the fetch cascade, searxng-mcp reads the domain's `tier_stats_30
 
 `tier_skip` keys can be bare domains (`example.com` matches the domain and all subdomains) or domain + path prefix (`example.com/api/`). The file is hot-reloaded — no restart needed. Manual overrides emit `reason: operator_override`.
 
+## PDF fast path
+
+PDF text is extracted in-process with [`unpdf`](https://github.com/unjs/unpdf) (a pdf.js build) — keyless, no service to deploy. It replaces Firecrawl v2, the only tier that ever parsed PDFs, which was removed in this fork.
+
+A URL takes this path when its path ends in `.pdf` (no probe needed), or when the [content-type probe](#content-type-fast-path)'s `HEAD` reports `application/pdf` — which is how extensionless PDFs (`arxiv.org/pdf/<id>`, `?download=` handlers) are found. It runs after the robots gate and `assertResolvedPublic`, fetches through `safeFetch`, and follows redirects by hand (at most 5) so every hop is re-checked by the string-level SSRF guard as well as the connect-time one.
+
+- The body is read as bytes, capped at `PDF_MAX_BYTES` (20 MB) — a declared `Content-Length` over the cap is refused before reading, and a stream that crosses it is cancelled. The `%PDF-` signature must appear in the first 1 KB, or the body is treated as not a PDF.
+- Output: the PDF's `Title` metadata (or the filename) as the title; text is each page under a `--- page N ---` marker, whitespace collapsed. Pages are walked up to `PDF_MAX_PAGES` (50) and stop once the text reaches the fetch store size (8,000–40,000 chars), so CPU is bounded by what would be kept anyway; a page-cap stop is noted at the end.
+- Recorded through `runTier` as `pdf_local` (domain-db slot `pdf`), cached like every other fast path.
+- **Fail-open**, with one exception. A non-PDF body at a `.pdf` URL, an oversize file, an HTTP error or a parse failure falls through to the cascade, and the `pdf_local` reason is named in the final error if that fails too. A PDF that parses but has **no text layer** (scanned/image-only) or needs a password is a fact about the document, so it is returned as an error — `PDF has no extractable text layer (scanned?)` — rather than retried. There is no OCR.
+- `PDF_EXTRACT_ENABLED=false` turns the path off; PDFs then take the cascade and fail at tier 3, as before.
+
 ## Content-type fast path
 
 A URL serving structured, non-HTML content — `application/json`, any `*+json`, XML, YAML, TOML, CSV, or `text/plain` — is detected via a `HEAD` probe and routed straight to the raw-HTTP tier instead of through Crawl4AI. JSON is returned pretty-printed inside a fenced code block. Previously, asking a headless browser to render a JSON API response or CDN asset returned empty markdown, so API and CDN endpoints (`registry.npmjs.org`, `api.osv.dev`, `cdn.jsdelivr.net`, …) simply failed.
@@ -143,7 +163,7 @@ Guarantees:
 
 Every fetch records what searxng-mcp learns about the target domain to Valkey under `domain:<hostname>` (90-day TTL, schema_version 7). Captured per record:
 
-- `tier_stats_30d.{tier2,tier3,tier4,solver,github}.{attempts, ok, fail, last_fail_reason, window_start_ms}` — fetch success rate per tier over a rolling 30-day window. The cutoff is applied at **read time**, shared by tier-routing decisions and `domain_stats` reporting, so the two cannot disagree — a domain fetched once and then left idle reports a genuinely empty window rather than stale numbers surviving until the next write. The `tier4` (Wayback Machine) slot is recorded only when `WAYBACK_ENABLED=true`; the `solver` slot (Byparr challenge-solving tier, see [Challenge detection and solver tier](#challenge-detection-and-solver-tier)) only when `SOLVER_ENABLED=true`. The `github` slot records the [GitHub fast path](tools.md#github-urls) (`raw.githubusercontent.com` / `api.github.com` / `github.com` README fetches), which bypasses the tier cascade but is still tracked here. A `schema_version` bump rebuilds existing records fresh — accumulated windows for currently-idle domains are discarded (precedented across the 1→2 through 6→7 bumps). Removing Firecrawl did **not** bump the version: records written by upstream builds still carry `tier1` and `crawl` slots, which nothing reads and which are stripped on the next write.
+- `tier_stats_30d.{tier2,tier3,tier4,solver,github,pdf}.{attempts, ok, fail, last_fail_reason, window_start_ms}` — fetch success rate per tier over a rolling 30-day window. The cutoff is applied at **read time**, shared by tier-routing decisions and `domain_stats` reporting, so the two cannot disagree — a domain fetched once and then left idle reports a genuinely empty window rather than stale numbers surviving until the next write. The `tier4` (Wayback Machine) slot is recorded only when `WAYBACK_ENABLED=true`; the `solver` slot (Byparr challenge-solving tier, see [Challenge detection and solver tier](#challenge-detection-and-solver-tier)) only when `SOLVER_ENABLED=true`. The `github` slot records the [GitHub fast path](tools.md#github-urls) (`raw.githubusercontent.com` / `api.github.com` / `github.com` README fetches), which bypasses the tier cascade but is still tracked here. A `schema_version` bump rebuilds existing records fresh — accumulated windows for currently-idle domains are discarded (precedented across the 1→2 through 6→7 bumps). Removing Firecrawl did **not** bump the version: records written by upstream builds still carry `tier1` and `crawl` slots, which nothing reads and which are stripped on the next write. Adding the `pdf` slot (the [PDF fast path](#pdf-fast-path)) did not bump it either: a record written before the slot existed reads as an empty `pdf` window, gets the slot back-filled on its next write, and is still admitted by the snapshot restore guard.
 - `capabilities.metadata_fetch.{attempts, ok, fail, last_fail_reason}` — success/failure of the metadata side-channel fetch (`fetchRawHtmlForMetadata`, used for JSON-LD/og:title sampling). Tracked separately from `tier_stats_30d` since it answers "is this domain reachable at all", not "did full-content delivery succeed".
 - `capabilities.seen_in_search.{count, last_seen_ms}` — how often the domain appears in `search` results. Written fire-and-forget by `searxSearch()` on every return path (including cache hits) with no fetch performed, so a domain can be tracked before it is ever fetched.
 - `capabilities.robots_txt.{present, fetched, allows_us}` — robots.txt presence and whether it permits us

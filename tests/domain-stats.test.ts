@@ -13,6 +13,7 @@ import {
   aggregateDomainStats,
   enumerateDomains,
   formatDomainRecord,
+  summarizeDomainRecord,
 } from "../src/domain-stats.js";
 
 const getValkeyMock = vi.mocked(getValkey);
@@ -40,6 +41,7 @@ function mkRecord(
       tier4: stat(0, 0, 0),
       github: stat(0, 0, 0),
       solver: stat(0, 0, 0),
+      pdf: stat(0, 0, 0),
       ...tiers,
     },
   };
@@ -484,5 +486,38 @@ describe("enumerateDomains collects stale-schema keys for reaping", () => {
 
     expect(r.unavailable).toBeDefined();
     expect(r.staleKeys).toEqual([]);
+  });
+});
+
+// A schema-7 record written before the `pdf` slot existed lacks the key (no
+// schema bump — see SCHEMA_VERSION). Every reader must treat it as empty.
+describe("records that predate the pdf slot", () => {
+  function legacy(): DomainRecord {
+    const r = mkRecord("old.com", { tier2: stat(6, 6, 0) });
+    delete (r.tier_stats_30d as Partial<DomainRecord["tier_stats_30d"]>).pdf;
+    return r;
+  }
+
+  it("renders the missing slot as no data, not as an expired window", () => {
+    const text = formatDomainRecord(legacy(), NOW);
+    const row = text.split("\n").find((l) => l.trim().startsWith("pdf"));
+    expect(row).toBe("  pdf (local)      : no data");
+  });
+
+  it("summarizes the missing slot as zero attempts", () => {
+    const summary = summarizeDomainRecord(legacy(), NOW);
+    expect(summary.tiers.pdf).toEqual({
+      attempts: 0,
+      ok: 0,
+      fail: 0,
+      success_rate: null,
+    });
+    expect(summary.tiers.tier2.attempts).toBe(6);
+  });
+
+  it("aggregates without the missing slot", () => {
+    const agg = aggregateDomainStats([legacy()], false, NOW);
+    expect(agg.tiers.pdf.attempts).toBe(0);
+    expect(agg.tiers.tier2.attempts).toBe(6);
   });
 });
