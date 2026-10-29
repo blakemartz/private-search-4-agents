@@ -1017,16 +1017,26 @@ const EnginesSchema = z
   .optional()
   .describe("Comma-separated SearXNG engines to restrict to; omit normally");
 
+/**
+ * A boolean parameter that also accepts "true"/"false" strings, for clients
+ * that stringify arguments. NOT z.coerce.boolean(): that is Boolean(value),
+ * under which the string "false" is true — an agent asking for fresh: "false"
+ * would get the cache bypassed, and answer: "false" a 60-second synthesis.
+ */
+export const BoolArg = z.preprocess(
+  (v) => (v === "true" ? true : v === "false" ? false : v),
+  z.boolean(),
+);
+
 const DomainListSchema = (what: string) =>
   z
     .union([z.string(), z.array(z.string()).max(50)])
     .optional()
     .describe(what);
 
-const FreshSchema = z.coerce
-  .boolean()
-  .optional()
-  .describe("Bypass the cache for this call (search 1h, pages 24h)");
+const FreshSchema = BoolArg.optional().describe(
+  "Bypass the cache for this call (search 1h, pages 24h)",
+);
 
 /**
  * `min_score` filters on the RAW cross-encoder relevance, not the
@@ -1121,12 +1131,9 @@ export function registerTools(server: McpServer): void {
           .describe(
             "snippets (default, fast): engine snippets. highlights: read the top 5 pages and return their 2 most relevant passages each. full: also return the top 3 pages' text",
           ),
-        answer: z.coerce
-          .boolean()
-          .optional()
-          .describe(
-            "Add an answer synthesized from the top 3 pages, with citations (local LLM, ~10-60s)",
-          ),
+        answer: BoolArg.optional().describe(
+          "Add an answer synthesized from the top 3 pages, with citations (local LLM, ~10-60s)",
+        ),
         include_domains: DomainListSchema(
           "Only return results from these domains, e.g. ['github.com']",
         ),
@@ -1139,12 +1146,9 @@ export function registerTools(server: McpServer): void {
         language: LanguageSchema,
         min_score: MinScoreSchema,
         fresh: FreshSchema,
-        expand: z.coerce
-          .boolean()
-          .optional()
-          .describe(
-            "Have the local LLM add query variants (~3s); passing your own phrasings in query is usually better",
-          ),
+        expand: BoolArg.optional().describe(
+          "Have the local LLM add query variants (~3s); passing your own phrasings in query is usually better",
+        ),
         engines: EnginesSchema,
       },
       outputSchema: SearchOutputSchema,
@@ -1226,10 +1230,9 @@ export function registerTools(server: McpServer): void {
           .max(100)
           .default(CRAWL_MAX_PAGES_DEFAULT)
           .describe(`Page cap (default ${CRAWL_MAX_PAGES_DEFAULT})`),
-        same_domain_only: z.coerce
-          .boolean()
-          .default(true)
-          .describe("Stay on the start domain (default true)"),
+        same_domain_only: BoolArg.default(true).describe(
+          "Stay on the start domain (default true)",
+        ),
         include_path: z
           .string()
           .optional()

@@ -857,3 +857,14 @@ describe("handleFetchUrl — query", () => {
     );
   });
 });
+
+describe("BoolArg", () => {
+  it('parses "false" as false — z.coerce.boolean() would make it true', async () => {
+    const { BoolArg } = await import("../src/tools.js");
+    expect(BoolArg.parse("false")).toBe(false);
+    expect(BoolArg.parse("true")).toBe(true);
+    expect(BoolArg.parse(false)).toBe(false);
+    expect(BoolArg.parse(true)).toBe(true);
+    expect(() => BoolArg.parse("yes")).toThrow();
+  });
+});
