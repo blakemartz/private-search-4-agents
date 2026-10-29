@@ -60,10 +60,13 @@ export async function initObservability(): Promise<void> {
     const nodeSdk = new NodeSDK({
       serviceName,
       traceExporter: new OTLPTraceExporter(),
-      metricReader: new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter(),
-        exportIntervalMillis: 60_000,
-      }),
+      // `metricReaders` (an array) since sdk-node 0.300; `metricReader` is gone.
+      metricReaders: [
+        new PeriodicExportingMetricReader({
+          exporter: new OTLPMetricExporter(),
+          exportIntervalMillis: 60_000,
+        }),
+      ],
     });
     nodeSdk.start();
     sdk = nodeSdk;
