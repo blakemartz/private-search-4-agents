@@ -11,7 +11,8 @@ name: searxng-mcp-adblock-proxy
 
 services:
   adblock-proxy:
-    image: ghcr.io/tadmstr/searxng-mcp-adblock-proxy:latest # SECURITY[accepted]: latest tag — standalone example file; pin by digest for production
+    build: .
+    image: private-search-4-agents-adblock-proxy:local
     # Or build it from the source beside this file:
     # build: .
     restart: unless-stopped

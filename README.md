@@ -55,7 +55,7 @@ works, what does not, and which environment variable moves you up.
 
 | Rung | File | Adds | Containers | RAM | Unlocks |
 |---|---|---|---|---|---|
-| 1 | [`compose.minimal.yml`](examples/compose.minimal.yml) | SearXNG + searxng-mcp | 2 | ~600 MB | The least you can run |
+| 1 | [`compose.minimal.yml`](examples/compose.minimal.yml) | SearXNG + this server | 2 | ~600 MB | The least you can run |
 | 2 | [`compose.crawl4ai.yml`](examples/compose.crawl4ai.yml) | cache, Crawl4AI | 4 | ~6 GB | JS rendering, real caching |
 | 3 | [`compose.reranker.yml`](examples/compose.reranker.yml) | reranker | 5 | ~8 GB | Relevance reranking, `min_score` |
 | 4 | [`compose.full.yml`](examples/compose.full.yml) | Ollama, Kiwix, NATS, adblock | 9 | ~20 GB | Summarisation, offline corpora |
@@ -88,12 +88,12 @@ EasyList + EasyPrivacy) and reloaded on a schedule.
 
 For a full local topology including Crawl4AI, Ollama, Kiwix, the adblock proxy, and NATS, see rung 4 of the ladder above — [`examples/compose.full.yml`](examples/compose.full.yml).
 
-## Why searxng-mcp?
+## Why this server?
 
 There are a number of SearXNG MCP servers. Most wrap the search endpoint and stop there. The
 differentiators here are in what happens *after* the search:
 
-| | searxng-mcp | Typical SearXNG MCP server |
+| | private-search-4-agents | Typical SearXNG MCP server |
 |---|---|---|
 | SearXNG search | yes | yes |
 | ML reranking of results | local cross-encoder, reorders by relevance — ships in [`docker/reranker/`](docker/reranker/) | SearXNG's own ordering |

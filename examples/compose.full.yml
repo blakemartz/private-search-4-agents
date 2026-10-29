@@ -131,10 +131,8 @@ services:
   # On fetch-net only — unreachable from ollama, reranker, kiwix, nats.
   # Port 8118 exposed to host so searxng-mcp (PM2/host process) can reach it.
   adblock-proxy:
-    image: ghcr.io/tadmstr/searxng-mcp-adblock-proxy:latest # SECURITY[accepted]: latest tag — example file; pin for production
-    # To build from source instead of pulling:
-    # build:
-    #   context: ../docker/adblock-proxy
+    build: ../docker/adblock-proxy
+    image: private-search-4-agents-adblock-proxy:local
     restart: unless-stopped
     # No `user:`: the image's Dockerfile already sets `USER proxy` (non-root).
     cap_drop: [ALL]
@@ -228,9 +226,8 @@ services:
   #   - Infinity with a cross-encoder model: https://github.com/michaelfeil/infinity
   #   - Any service exposing a Jina-compatible /v1/rerank
   reranker:
-    image: ghcr.io/tadmstr/searxng-mcp-reranker:latest # SECURITY[accepted]: latest tag — example file; pin for production
-    # To build from source instead of pulling:
-    # build: ../docker/reranker
+    build: ../docker/reranker
+    image: private-search-4-agents-reranker:local
     restart: unless-stopped
     # Matches docker/reranker/docker-compose.yml, which pins the same uid: the
     # image already runs as 10001, and naming it here means a `docker run` that
@@ -303,7 +300,9 @@ services:
 
   # ── searxng-mcp ─────────────────────────────────────────────────────────────
   searxng-mcp:
-    image: ghcr.io/tadmstr/searxng-mcp:latest # SECURITY[accepted]: latest tag — example file; pin a version for production
+    build:
+      context: ..
+    image: private-search-4-agents:local # built from this repo; the fork publishes no image
     restart: unless-stopped
     depends_on:
       - searxng

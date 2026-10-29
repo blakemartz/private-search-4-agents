@@ -29,7 +29,7 @@ All service URLs are configurable via environment variables.
 | `CACHE_TTL_SECONDS` | `3600` | Search result cache TTL in seconds |
 | `FETCH_CACHE_TTL_SECONDS` | `86400` | Fetched page cache TTL in seconds |
 | `CRAWL_MANIFEST_TTL_SECONDS` | `21600` | Crawl manifest and page content cache TTL in seconds (6 hours) |
-| `CRAWL_MAX_PAGES_DEFAULT` | `20` | Intended default for `crawl_site`'s `max_pages`. **Currently not read:** the tool schema defaults `max_pages` to `20` itself, so changing this has no effect. |
+| `CRAWL_MAX_PAGES_DEFAULT` | `20` | Default for `crawl_site`'s `max_pages` (capped at 100) |
 | `CRAWL_BFS_ENABLED` | `false` | Set to `true` to enable the BFS (link-following) fallback in `crawl_site`. Server-side only — the tool has no per-call switch. |
 | `CRAWL_BFS_MAX_DEPTH` | `3` | Maximum link-hop depth for BFS crawl |
 | `EXPAND_QUERIES` | `false` | Set to `true` to enable query expansion globally |

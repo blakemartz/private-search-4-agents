@@ -378,9 +378,10 @@ export const CRAWL_MANIFEST_TTL_SECONDS = parseInt(
   process.env.CRAWL_MANIFEST_TTL_SECONDS ?? "21600",
   10,
 );
-export const CRAWL_MAX_PAGES_DEFAULT = parseInt(
-  process.env.CRAWL_MAX_PAGES_DEFAULT ?? "20",
-  10,
+/** crawl_site's default max_pages, clamped to the schema's 1–100 range. */
+export const CRAWL_MAX_PAGES_DEFAULT = Math.min(
+  100,
+  positiveIntEnv("CRAWL_MAX_PAGES_DEFAULT", 20),
 );
 export const CRAWL_BFS_ENABLED = process.env.CRAWL_BFS_ENABLED === "true";
 export const CRAWL_BFS_MAX_DEPTH = parseInt(

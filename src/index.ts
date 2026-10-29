@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { logCapabilities } from "./capabilities.js";
 import {
+  ADMIN_TOOLS_ENABLED,
   HTTP_AUTH_TOKEN,
   HTTP_HOST,
   HTTP_PORT,
@@ -89,7 +90,7 @@ if (TRANSPORT === "http") {
     // than leaving it to be discovered by an audit.
     if (!isLoopbackHost(HTTP_HOST) && HTTP_AUTH_TOKEN === "") {
       logWarn(
-        `WARNING: bound to ${HTTP_HOST}:${HTTP_PORT}, which is not loopback, with SEARXNG_MCP_AUTH_TOKEN unset — every tool is reachable unauthenticated, including arbitrary-URL fetch_url and destructive clear_cache. Set SEARXNG_MCP_AUTH_TOKEN.`,
+        `WARNING: bound to ${HTTP_HOST}:${HTTP_PORT}, which is not loopback, with SEARXNG_MCP_AUTH_TOKEN unset — every tool is reachable unauthenticated, including arbitrary-URL fetch_url${ADMIN_TOOLS_ENABLED ? " and destructive clear_cache" : ""}. Set SEARXNG_MCP_AUTH_TOKEN.`,
       );
     }
     if (HTTP_AUTH_TOKEN !== "" && HTTP_AUTH_TOKEN.length < 32) {

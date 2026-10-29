@@ -2,97 +2,9 @@
 
 # Install and deployment
 
-> **This fork (`private-search-4-agents`) is not published to npm or GHCR** (`package.json` is
-> `"private": true`). The `@tadmstr/searxng-mcp` package and `ghcr.io/tadmstr/*` images below are
-> upstream's: they predate the fork and still carry the old seven-tool surface and Firecrawl. To
-> run this fork, build [from source](#from-source) (or build the `Dockerfile`) and point the client
-> recipes at `build/src/index.js` or the HTTP endpoint.
-
-## npm (upstream)
-
-```bash
-npm install -g @tadmstr/searxng-mcp
-```
-
-Or run directly with `npx`:
-
-```bash
-npx @tadmstr/searxng-mcp
-```
-
-## Container image (upstream)
-
-Upstream publishes to GHCR on every release tag (see the note at the top):
-
-```bash
-docker pull ghcr.io/tadmstr/searxng-mcp:latest
-```
-
-```bash
-docker run -d --name searxng-mcp -p 127.0.0.1:3001:3001 \
-  -e SEARXNG_URL=http://searxng:8080 \
-  -e SEARXNG_MCP_TRANSPORT=http \
-  -e SEARXNG_MCP_AUTH_TOKEN="$(openssl rand -hex 32)" \
-  ghcr.io/tadmstr/searxng-mcp:latest
-```
-
-Available tags, `linux/amd64`:
-
-| Tag | Moves | Use it when |
-|-----|-------|-------------|
-| `v3.24.0` and `3.24.0` | never | You want a specific release pinned. Both spellings are published — the git tag carries the `v`, the conventional Docker tag does not. |
-| `3.24` | to the newest stable `3.24.x` | You want patches automatically but not minor bumps. |
-| `latest` | to the newest stable release | You want the current release and can tolerate minor bumps. |
-
-Prereleases (`v3.24.0-rc1`) publish their exact tags only — they never move
-`3.24` or `latest`.
-
-The image runs as uid 1000 and is not root. Every published image has passed
-the same smoke assertions CI runs — `/health` answers unauthenticated, `/mcp`
-returns 401 without a bearer token and 200 with the right one — executed
-against that exact image before it was pushed. Build provenance is attested
-and pushed to the registry alongside it:
-
-```bash
-gh attestation verify oci://ghcr.io/tadmstr/searxng-mcp:latest --owner TadMSTR
-```
-
-### Verifying the registry copy directly
-
-The attestation is also in GHCR, but **GHCR does not implement the OCI
-referrers API** — `GET /v2/<name>/referrers/<digest>` returns
-`404 MANIFEST_UNKNOWN` even for a digest that exists and has an attestation.
-
-That 404 is easy to read as "there is no attestation". It is not. GHCR uses the
-spec's *fallback tag* scheme instead, publishing the referrers index under a tag
-named `sha256-<digest>`:
-
-```bash
-REPO=tadmstr/searxng-mcp
-TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:$REPO:pull&service=ghcr.io" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
-
-# Resolve the tag to a digest...
-DIGEST=$(curl -sI -H "Authorization: Bearer $TOKEN" \
-  -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json" \
-  "https://ghcr.io/v2/$REPO/manifests/latest" \
-  | tr -d '\r' | awk -F': ' '/[Dd]ocker-[Cc]ontent-[Dd]igest/{print $2}')
-
-# ...then read the referrers index from the fallback tag (note ':' -> '-')
-curl -s -H "Authorization: Bearer $TOKEN" \
-  -H "Accept: application/vnd.oci.image.index.v1+json" \
-  "https://ghcr.io/v2/$REPO/manifests/${DIGEST/:/-}" | python3 -m json.tool
-```
-
-which returns an index whose entry carries
-`artifactType: application/vnd.dev.sigstore.bundle.v0.3+json` and
-`dev.sigstore.bundle.predicateType: https://slsa.dev/provenance/v1`.
-
-`cosign`, `oras` and `crane` implement the fallback and find this without any
-of the above. A bare `curl` against `/referrers/` does not, and reports zero —
-which is exactly how vikunja#689 came to conclude the attestation was missing.
-
-Verified 2026-09-06 against both published images at v3.25.0 and v3.25.1.
+This fork is not published to npm or a container registry (`package.json` is `"private": true`).
+Build it from source, or build the `Dockerfile`. Upstream's `@tadmstr/searxng-mcp` package and
+`ghcr.io/tadmstr/*` images are a different project now (seven tools, Firecrawl).
 
 ## From source
 
@@ -103,9 +15,21 @@ pnpm install
 pnpm build
 ```
 
-Output: `build/src/index.js`
+Output: `build/src/index.js`. Requires Node.js 22+ (`engines`; the PDF extractor `unpdf` needs it).
+The client recipes below use `/path/to/private-search-4-agents` for the checkout.
 
-Requires Node.js 22+ (`engines`; the PDF extractor `unpdf` needs it).
+## Container image
+
+```bash
+docker build -t private-search-4-agents:local .
+docker run --rm -p 127.0.0.1:3001:3001 \
+  -e SEARXNG_URL=http://searxng:8080 \
+  -e SEARXNG_MCP_AUTH_TOKEN=change-me \
+  private-search-4-agents:local
+```
+
+The `examples/compose.*.yml` files build the same image (and the reranker and adblock-proxy sidecars
+from `docker/`) instead of pulling.
 
 # MCP Client Configuration
 
@@ -115,8 +39,8 @@ The recommended approach uses `claude mcp add-json` to register the server with 
 
 ```bash
 claude mcp add-json searxng --scope user '{
-  "command": "npx",
-  "args": ["-y", "@tadmstr/searxng-mcp"],
+  "command": "node",
+  "args": ["/path/to/private-search-4-agents/build/src/index.js"],
   "env": {
     "SEARXNG_URL": "http://localhost:8081",
     "RERANKER_URL": "http://localhost:8787",
@@ -138,8 +62,8 @@ This writes to `~/.claude.json`. Do not add searxng to `~/.claude/settings.json`
 {
   "mcpServers": {
     "searxng": {
-      "command": "npx",
-      "args": ["-y", "@tadmstr/searxng-mcp"],
+      "command": "node",
+      "args": ["/path/to/private-search-4-agents/build/src/index.js"],
       "env": {
         "SEARXNG_URL": "http://localhost:8081",
         "RERANKER_URL": "http://localhost:8787",
@@ -160,7 +84,7 @@ mcpServers:
     type: stdio
     command: node
     args:
-      - /path/to/searxng-mcp/build/src/index.js
+      - /path/to/private-search-4-agents/build/src/index.js
     env:
       SEARXNG_URL: http://localhost:8081
       RERANKER_URL: http://localhost:8787
@@ -225,7 +149,7 @@ not something specific to the proxy above.
 **HTTP** — set `SEARXNG_MCP_TRANSPORT=http` to run as a shared HTTP/SSE server suitable for multi-client deployments or Docker-based setups. Binds to `SEARXNG_MCP_HOST:SEARXNG_MCP_PORT` (default `127.0.0.1:3001`):
 
 ```bash
-SEARXNG_MCP_TRANSPORT=http SEARXNG_MCP_PORT=3001 npx @tadmstr/searxng-mcp
+SEARXNG_MCP_TRANSPORT=http SEARXNG_MCP_PORT=3001 node build/src/index.js
 ```
 
 Register with Claude Code against an HTTP server:

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { cacheClear } from "./cache.js";
-import { ADMIN_TOOLS_ENABLED } from "./config.js";
+import { ADMIN_TOOLS_ENABLED, CRAWL_MAX_PAGES_DEFAULT } from "./config.js";
 import { newRequestId, withRequestId } from "./context.js";
 import { crawlSite, formatCrawlManifest } from "./crawl.js";
 import {
@@ -1217,8 +1217,8 @@ export function registerTools(server: McpServer): void {
           .int()
           .min(1)
           .max(100)
-          .default(20)
-          .describe("Page cap (default 20)"),
+          .default(CRAWL_MAX_PAGES_DEFAULT)
+          .describe(`Page cap (default ${CRAWL_MAX_PAGES_DEFAULT})`),
         same_domain_only: z.coerce
           .boolean()
           .default(true)

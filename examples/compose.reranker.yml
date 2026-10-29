@@ -165,9 +165,8 @@ services:
   #   - Infinity with a cross-encoder model: https://github.com/michaelfeil/infinity
   #   - Anything exposing a Jina-compatible /v1/rerank
   reranker:
-    image: ghcr.io/tadmstr/searxng-mcp-reranker:latest # SECURITY[accepted]: latest tag — example file; pin for production
-    # To build from source instead of pulling:
-    # build: ../docker/reranker
+    build: ../docker/reranker
+    image: private-search-4-agents-reranker:local
     restart: unless-stopped
     # The image already runs as 10001; naming it here means a `docker run` that
     # overrides the entrypoint cannot quietly regain root. Matches
@@ -191,7 +190,9 @@ services:
 
   # ── searxng-mcp ─────────────────────────────────────────────────────────────
   searxng-mcp:
-    image: ghcr.io/tadmstr/searxng-mcp:latest # SECURITY[accepted]: latest tag — example file; pin a version for production
+    build:
+      context: ..
+    image: private-search-4-agents:local # built from this repo; the fork publishes no image
     restart: unless-stopped
     depends_on:
       - searxng

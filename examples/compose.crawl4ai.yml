@@ -147,7 +147,9 @@ services:
 
   # ── searxng-mcp ─────────────────────────────────────────────────────────────
   searxng-mcp:
-    image: ghcr.io/tadmstr/searxng-mcp:latest # SECURITY[accepted]: latest tag — example file; pin a version for production
+    build:
+      context: ..
+    image: private-search-4-agents:local # built from this repo; the fork publishes no image
     restart: unless-stopped
     depends_on:
       - searxng
