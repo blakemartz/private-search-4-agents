@@ -136,26 +136,34 @@ export async function rawFetch(
   // Client-side target_selector: scope extraction to the matched subtree.
   // wait_for_selector is a no-op here (raw HTTP renders no JS). If the selector
   // matches nothing, fall through to full-page extraction rather than erroring.
-  let doc = dom.window.document;
-  let selectorFallback: string | null = null;
-  if (tuning?.targetSelector) {
-    const el = doc.querySelector(tuning.targetSelector);
-    if (el) {
-      selectorFallback = htmlToMarkdown(el.outerHTML, url) || el.textContent;
-      doc = new JSDOM(el.outerHTML, { url }).window.document;
+  let scoped: JSDOM | undefined;
+  try {
+    let doc = dom.window.document;
+    let selectorFallback: string | null = null;
+    if (tuning?.targetSelector) {
+      const el = doc.querySelector(tuning.targetSelector);
+      if (el) {
+        selectorFallback = htmlToMarkdown(el.outerHTML, url) || el.textContent;
+        scoped = new JSDOM(el.outerHTML, { url });
+        doc = scoped.window.document;
+      }
     }
+
+    const reader = new Readability(doc, READABILITY_OPTIONS);
+    const article = reader.parse();
+
+    const text = (
+      articleToMarkdown(article, url) ??
+      selectorFallback ??
+      html
+    ).slice(0, maxChars);
+    const title = article?.title ?? url;
+    return { title, url, text, html };
+  } finally {
+    // See the note on closing JSDOM windows in src/extractors/markdown.ts.
+    scoped?.window.close();
+    dom.window.close();
   }
-
-  const reader = new Readability(doc, READABILITY_OPTIONS);
-  const article = reader.parse();
-
-  const text = (
-    articleToMarkdown(article, url) ??
-    selectorFallback ??
-    html
-  ).slice(0, maxChars);
-  const title = article?.title ?? url;
-  return { title, url, text, html };
 }
 
 export async function fetchRawHtmlForMetadata(

@@ -52,8 +52,9 @@ export function runReadability(
   html: string,
   url: string,
 ): ReadabilityResult | null {
+  let dom: JSDOM | undefined;
   try {
-    const dom = new JSDOM(html, { url });
+    dom = new JSDOM(html, { url });
     const reader = new Readability(dom.window.document, READABILITY_OPTIONS);
     const article = reader.parse();
     if (!article?.textContent) return null;
@@ -67,6 +68,9 @@ export function runReadability(
     // Reviewed (vikunja#687 class sweep): pure local parse over HTML already
     // in hand. Null means "could not extract an article", which is true.
     return null;
+  } finally {
+    // See the note on closing JSDOM windows in src/extractors/markdown.ts.
+    dom?.window.close();
   }
 }
 

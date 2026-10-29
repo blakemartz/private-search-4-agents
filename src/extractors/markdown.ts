@@ -271,10 +271,21 @@ export function nodeToMarkdown(node: Node, baseUrl: string): string {
   return compactMarkdown(service.turndown(node as HTMLElement));
 }
 
+// JSDOM windows are closed once the DOM has been read, which stops the
+// window's timers and is what jsdom documents for a finished window. Memory is
+// NOT the reason: a document is released after its own load callbacks run on
+// a later turn of the event loop, closed or not, so async callers (every
+// fetch path here) do not accumulate. A synchronous loop that never yields
+// does — see jsdomProperty in tests/extractors.fuzz.test.ts.
+
 /** As {@link nodeToMarkdown}, for an HTML fragment string. */
 export function htmlToMarkdown(html: string, baseUrl: string): string {
   const dom = new JSDOM(`<body>${html}</body>`, { url: baseUrl });
-  return nodeToMarkdown(dom.window.document.body, baseUrl);
+  try {
+    return nodeToMarkdown(dom.window.document.body, baseUrl);
+  } finally {
+    dom.window.close();
+  }
 }
 
 /**

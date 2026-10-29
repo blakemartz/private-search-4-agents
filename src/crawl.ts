@@ -300,9 +300,13 @@ export async function bfsCrawl(
       try {
         const { JSDOM } = await import("jsdom");
         const dom = new JSDOM(rawHtml, { url: normalizedUrl });
-        const anchors = dom.window.document.querySelectorAll("a[href]");
-        for (const anchor of anchors) {
-          const href = (anchor as HTMLAnchorElement).href;
+        // Read hrefs out as strings, then close the window (see the note on
+        // closing JSDOM windows in src/extractors/markdown.ts).
+        const hrefs = [...dom.window.document.querySelectorAll("a[href]")].map(
+          (a) => (a as HTMLAnchorElement).href,
+        );
+        dom.window.close();
+        for (const href of hrefs) {
           if (!href.startsWith("http")) continue;
           const normalized = href.split("#")[0];
           if (visited.has(normalized)) continue;

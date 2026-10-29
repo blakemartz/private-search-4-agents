@@ -136,6 +136,26 @@ const url = fc.oneof(
   fc.constant("https://example.com/"),
 );
 
+// A JSDOM document is released only after its own load callbacks run, and
+// those are queued behind the current task. fc.property runs every iteration
+// synchronously, so they never run inside a property and several hundred
+// documents pile up — over a 2 GB heap on CI's runners
+// (measured: 1,000 documents built in a synchronous loop retain ~1 GB; the
+// same loop yielding once at the end settles at ~40 MB). jsdomProperty is
+// fc.asyncProperty with one setImmediate turn per iteration, which is enough
+// to let each document go (a bare microtask turn is not).
+// biome-ignore lint/suspicious/noExplicitAny: mirrors fc.property's variadic arbitraries
+function jsdomProperty(...args: any[]) {
+  const predicate = args.pop() as (...xs: unknown[]) => unknown;
+  return fc.asyncProperty(
+    ...(args as [fc.Arbitrary<unknown>]),
+    async (...xs: unknown[]) => {
+      predicate(...xs);
+      await new Promise((r) => setImmediate(r));
+    },
+  );
+}
+
 function domOf(h: string, u: string): JSDOM | null {
   try {
     return new JSDOM(h, { url: u });
@@ -149,9 +169,9 @@ function domOf(h: string, u: string): JSDOM | null {
 describe("extractTitle — total, and always a non-empty string", () => {
   it(
     "never throws and always returns a non-empty string",
-    () => {
-      fc.assert(
-        fc.property(html, url, (h, u) => {
+    async () => {
+      await fc.assert(
+        jsdomProperty(html, url, (h, u) => {
           const dom = domOf(h, u);
           if (!dom) return;
           const title = extractTitle(dom, u);
@@ -168,9 +188,9 @@ describe("extractTitle — total, and always a non-empty string", () => {
 
   it(
     "is deterministic — the same DOM twice gives the same title",
-    () => {
-      fc.assert(
-        fc.property(html, url, (h, u) => {
+    async () => {
+      await fc.assert(
+        jsdomProperty(html, url, (h, u) => {
           const a = domOf(h, u);
           const b = domOf(h, u);
           if (!a || !b) return;
@@ -186,9 +206,9 @@ describe("extractTitle — total, and always a non-empty string", () => {
 describe("scanJsonLd / extractJsonLdArticle — total, declared shape", () => {
   it(
     "scanJsonLd never throws and returns booleans/strings only",
-    () => {
-      fc.assert(
-        fc.property(html, url, (h, u) => {
+    async () => {
+      await fc.assert(
+        jsdomProperty(html, url, (h, u) => {
           const dom = domOf(h, u);
           if (!dom) return;
           const scan = scanJsonLd(dom);
@@ -219,9 +239,9 @@ describe("scanJsonLd / extractJsonLdArticle — total, declared shape", () => {
   // at least one of the two populated, and each present field must be a string.
   it(
     "extractJsonLdArticle returns null or a genuinely populated article",
-    () => {
-      fc.assert(
-        fc.property(html, url, (h, u) => {
+    async () => {
+      await fc.assert(
+        jsdomProperty(html, url, (h, u) => {
           const dom = domOf(h, u);
           if (!dom) return;
           const article = extractJsonLdArticle(dom);
@@ -256,9 +276,9 @@ describe("scanJsonLd / extractJsonLdArticle — total, declared shape", () => {
   // rather than one of them finding phantom structure.
   it(
     "HTML with no ld+json block is reported absent by both",
-    () => {
-      fc.assert(
-        fc.property(
+    async () => {
+      await fc.assert(
+        jsdomProperty(
           fc
             .array(fc.string({ maxLength: 40 }), { maxLength: 5 })
             .map((p) => `<p>${p.join("</p><p>")}</p>`),
@@ -280,9 +300,9 @@ describe("scanJsonLd / extractJsonLdArticle — total, declared shape", () => {
 describe("runReadability — total", () => {
   it(
     "never throws; returns null or a result with a string text",
-    () => {
-      fc.assert(
-        fc.property(html, url, (h, u) => {
+    async () => {
+      await fc.assert(
+        jsdomProperty(html, url, (h, u) => {
           const r = runReadability(h, u);
           if (r === null) return;
           expect(typeof r.text).toBe("string");
@@ -296,9 +316,9 @@ describe("runReadability — total", () => {
 
   it(
     "never throws on a raw arbitrary string as HTML",
-    () => {
-      fc.assert(
-        fc.property(fc.string(), (s) => {
+    async () => {
+      await fc.assert(
+        jsdomProperty(fc.string(), (s) => {
           expect(() => runReadability(s, "https://example.com/")).not.toThrow();
         }),
         { numRuns: 500 },
@@ -350,9 +370,9 @@ describe("preferReadability — decision table holds for all inputs", () => {
 describe("postExtract — total, and honours maxChars", () => {
   it(
     "never throws, always returns the declared shape",
-    () => {
-      fc.assert(
-        fc.property(
+    async () => {
+      await fc.assert(
+        jsdomProperty(
           html,
           url,
           fc.string({ maxLength: 80 }),
@@ -380,9 +400,9 @@ describe("postExtract — total, and honours maxChars", () => {
 
   it(
     "the returned text never exceeds maxChars",
-    () => {
-      fc.assert(
-        fc.property(
+    async () => {
+      await fc.assert(
+        jsdomProperty(
           html,
           url,
           fc.string({ maxLength: 4000 }),
@@ -411,9 +431,9 @@ describe("postExtract — total, and honours maxChars", () => {
   // does, and it is generated over the JSON-LD shapes that produce `title: ""`.
   it(
     "never returns an empty title, whatever the page carries",
-    () => {
-      fc.assert(
-        fc.property(
+    async () => {
+      await fc.assert(
+        jsdomProperty(
           html,
           url,
           fc.string({ maxLength: 80 }),
@@ -441,9 +461,9 @@ describe("postExtract — total, and honours maxChars", () => {
   // hold: choosing json_ld as the source requires it to be present.
   it(
     "source === 'json_ld' implies jsonLdPresent",
-    () => {
-      fc.assert(
-        fc.property(
+    async () => {
+      await fc.assert(
+        jsdomProperty(
           html,
           url,
           fc.integer({ min: 1, max: 5000 }),

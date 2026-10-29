@@ -50,36 +50,41 @@ export function postExtract(input: PostExtractInput): PostExtractResult {
     };
   }
 
-  // JSON-LD Article schema wins unconditionally when its articleBody is substantive.
-  // (Per build plan 1A: "applies to raw HTML regardless of which tier served it".)
-  const { present: jsonLdPresent, article: jsonLd } = scanJsonLd(dom);
-  const jsonLdBodyUsable =
-    !!jsonLd?.text && jsonLd.text.length >= MIN_JSONLD_BODY_CHARS;
+  // See the note on closing JSDOM windows in src/extractors/markdown.ts.
+  try {
+    // JSON-LD Article schema wins unconditionally when its articleBody is substantive.
+    // (Per build plan 1A: "applies to raw HTML regardless of which tier served it".)
+    const { present: jsonLdPresent, article: jsonLd } = scanJsonLd(dom);
+    const jsonLdBodyUsable =
+      !!jsonLd?.text && jsonLd.text.length >= MIN_JSONLD_BODY_CHARS;
 
-  if (jsonLdBodyUsable && jsonLd?.text) {
+    if (jsonLdBodyUsable && jsonLd?.text) {
+      return {
+        title: jsonLd.title || extractTitle(dom, baselineTitle || url),
+        text: jsonLd.text.slice(0, maxChars),
+        source: "json_ld",
+        jsonLdPresent,
+      };
+    }
+
+    // No JSON-LD body — keep the tier's body and run the <head>-scoped title
+    // cascade (per build plan 1B). The cascade is scoped to <head>, so payment-
+    // widget / footer meta tags can't pollute it. Fall back to the tier's
+    // baseline title only when the cascade returns the URL fallback.
+    const cascadedTitle = extractTitle(dom, "");
+    const title = cascadedTitle
+      ? cascadedTitle
+      : isBaselineTitleUseful(baselineTitle, url)
+        ? baselineTitle
+        : url;
+
     return {
-      title: jsonLd.title || extractTitle(dom, baselineTitle || url),
-      text: jsonLd.text.slice(0, maxChars),
-      source: "json_ld",
+      title,
+      text: baselineText.slice(0, maxChars),
+      source: "baseline",
       jsonLdPresent,
     };
+  } finally {
+    dom.window.close();
   }
-
-  // No JSON-LD body — keep the tier's body and run the <head>-scoped title
-  // cascade (per build plan 1B). The cascade is scoped to <head>, so payment-
-  // widget / footer meta tags can't pollute it. Fall back to the tier's
-  // baseline title only when the cascade returns the URL fallback.
-  const cascadedTitle = extractTitle(dom, "");
-  const title = cascadedTitle
-    ? cascadedTitle
-    : isBaselineTitleUseful(baselineTitle, url)
-      ? baselineTitle
-      : url;
-
-  return {
-    title,
-    text: baselineText.slice(0, maxChars),
-    source: "baseline",
-    jsonLdPresent,
-  };
 }
