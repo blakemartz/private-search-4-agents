@@ -11,7 +11,7 @@ overrides:
   fast-uri: '>=4.2.3 <5'
   ip-address: '>=10.7.4 <11'
   qs: '>=6.16.1 <7'
-  vite: '>=8.3.3 <9'
+  vite: '>=8.3.5 <9'
   body-parser: '>=2.4.0 <3'
 
 importers:
@@ -95,7 +95,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       vite:
-        specifier: ^8.3.5
+        specifier: '>=8.3.5 <9'
         version: 8.3.5(@types/node@22.20.5)(yaml@2.9.1)
       vitest:
         specifier: ^4.1.12
@@ -647,7 +647,7 @@ packages:
     resolution: {integrity: sha512-fKShNpKZzupWZuY0z7egydvL0sqW4INEZBEExMBMAa6izlENEVHwoXgdaTCaBZ5fwlr4xf2o1wXC83n9RpO+NA==}
     peerDependencies:
       msw: ^2.4.9
-      vite: '>=8.3.3 <9'
+      vite: '>=8.3.5 <9'
     peerDependenciesMeta:
       msw:
         optional: true
@@ -1510,7 +1510,7 @@ packages:
       '@vitest/ui': 4.1.12
       happy-dom: '*'
       jsdom: '*'
-      vite: '>=8.3.3 <9'
+      vite: '>=8.3.5 <9'
     peerDependenciesMeta:
       '@edge-runtime/vm':
         optional: true
