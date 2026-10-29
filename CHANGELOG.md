@@ -57,6 +57,12 @@ tool surface, Firecrawl configuration and the minimum Node.js version all change
 
 ### Added
 
+- **`GET /livez`, a liveness probe that checks no dependency.** `/health` returns 503 while Valkey
+  is unreachable, though the server keeps serving uncached, so a Kubernetes liveness probe on it
+  would restart every replica during a cache outage. `/livez` always returns
+  `200 {"status":"ok"}` while the process answers. It is unauthenticated like `/health`, and
+  only for `GET` on that exact path. Deployment docs now include liveness and readiness probe
+  examples.
 - **PDF text extraction is back, locally.** Removing Firecrawl left no tier that could read a
   PDF: Crawl4AI renders it in a browser and finds no text, and tier 3 rejected it. A new fast
   path (`src/fetch/fastpaths/pdf.ts`) extracts PDF text in-process with `unpdf` — keyless, no service. It takes

@@ -95,7 +95,8 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
  * the Mcp-Session-Id header, per the SDK's documented stateful multi-session
  * pattern — a single shared transport rejects every session after the first.
  *
- * Also serves an unauthenticated `GET /health` (cache liveness) and bounds the
+ * Also serves unauthenticated `GET /livez` (process liveness) and `GET /health`
+ * (readiness: cache reachability), and bounds the
  * session map so a client killed mid-turn (which never fires `transport.onclose`)
  * can't leak transports on this long-lived shared process.
  */
@@ -149,7 +150,22 @@ export function createHttpRequestListener(
   return (req, res) => {
     void (async () => {
       try {
-        // Unauthenticated liveness probe. Pings Valkey through the bounded
+        // Unauthenticated process-liveness probe: answers whenever the event
+        // loop does, and checks no dependency. This is what a Kubernetes
+        // livenessProbe should hit. /health (below) goes 503 on a Valkey
+        // outage, during which this server keeps serving uncached — as a
+        // liveness probe it would restart every replica for a fault a restart
+        // cannot fix. Returns nothing but the status.
+        if (
+          req.method === "GET" &&
+          (req.url === "/livez" || req.url?.startsWith("/livez?"))
+        ) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end('{"status":"ok"}');
+          return;
+        }
+
+        // Unauthenticated readiness/health probe. Pings Valkey through the bounded
         // command timeout so it can never itself hang; lets sysadmin monitoring
         // detect a degraded cache from the MCP side. No session required.
         if (
@@ -172,7 +188,7 @@ export function createHttpRequestListener(
 
         // Bearer gate. Off unless SEARXNG_MCP_AUTH_TOKEN is set, so stdio users
         // and existing loopback deployments keep today's behaviour exactly.
-        // Placed after /health (the healthcheck must stay open) and before
+        // Placed after /livez and /health (probes must stay open) and before
         // session routing, so an unauthenticated caller can neither reach an
         // established session nor create one.
         if (HTTP_AUTH_TOKEN !== "") {

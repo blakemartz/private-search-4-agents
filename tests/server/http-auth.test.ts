@@ -182,4 +182,24 @@ describe("HTTP transport auth — token set", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ status: "ok", cache: "up" });
   });
+
+  it("leaves GET /livez unauthenticated — it is the liveness probe", async () => {
+    const port = await startWithToken(TOKEN);
+    const res = await fetch(`http://127.0.0.1:${port}/livez`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "ok" });
+  });
+
+  it("exempts only GET /livez exactly — not other methods or lookalike paths", async () => {
+    // The exemption must not become a way past the gate.
+    const port = await startWithToken(TOKEN);
+    const post = await fetch(`http://127.0.0.1:${port}/livez`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(post.status).toBe(401);
+    const lookalike = await fetch(`http://127.0.0.1:${port}/livezz`);
+    expect(lookalike.status).toBe(401);
+  });
 });

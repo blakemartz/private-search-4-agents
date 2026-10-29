@@ -51,3 +51,20 @@ describe("GET /health", () => {
     expect(body).toMatchObject({ status: "degraded", cache: "degraded" });
   });
 });
+
+describe("GET /livez", () => {
+  it("is 200 even while the cache is down — liveness checks no dependency", async () => {
+    // The point of a separate route: /health is 503 here, and a liveness
+    // probe on it would restart a server that is still serving uncached.
+    h.cacheUp = false;
+    const live = await fetch(`http://127.0.0.1:${port}/livez`);
+    expect(live.status).toBe(200);
+    expect(await live.json()).toEqual({ status: "ok" });
+    expect((await fetch(`http://127.0.0.1:${port}/health`)).status).toBe(503);
+  });
+
+  it("accepts a query string, like /health", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/livez?verbose`);
+    expect(res.status).toBe(200);
+  });
+});

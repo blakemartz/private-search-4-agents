@@ -175,7 +175,7 @@ The HTTP transport is **unauthenticated by default**, which is safe only because
 SEARXNG_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
 ```
 
-When it is set, every request except `GET /health` must carry the token as an [RFC 6750](https://datatracker.ietf.org/doc/html/rfc6750) bearer credential:
+When it is set, every request except `GET /livez` and `GET /health` must carry the token as an [RFC 6750](https://datatracker.ietf.org/doc/html/rfc6750) bearer credential:
 
 ```
 Authorization: Bearer <token>
@@ -195,9 +195,13 @@ claude mcp add-json searxng --scope user '{
 
 Leaving the variable unset preserves the previous behaviour exactly, so stdio users and existing loopback-bound HTTP deployments need no change. There is no per-caller authorization model — a single token authenticates *access to the server*, not a particular client identity. On startup, a non-loopback bind with no token logs a warning.
 
-**`GET /health` is deliberately exempt** from the check. It is the container healthcheck and the monitoring liveness probe, it takes no input, and its response (`status`, `cache`, `sessions`) carries no secrets.
+**`GET /livez` and `GET /health` are deliberately exempt** from the check. They are the probes, they take no input, and their responses carry no secrets. Only those exact paths with `GET` are exempt; any other method or path still needs the token.
 
-**`GET /health`** — unauthenticated liveness probe, localhost-bound alongside the MCP endpoint. Pings Valkey through the bounded cache command timeout (so the check itself can never hang) and returns:
+## Health probes
+
+**`GET /livez`** — process liveness. Returns `200 {"status":"ok"}` whenever the server's event loop answers, and checks no dependency. Point a Kubernetes `livenessProbe` here.
+
+**`GET /health`** — readiness. Served on the same address as the MCP endpoint. Pings Valkey through the bounded cache command timeout (so the check itself can never hang) and returns:
 
 ```json
 {"status": "ok", "cache": "up", "sessions": 3}
@@ -210,6 +214,21 @@ or, when the cache backend is unreachable:
 ```
 
 `sessions` is the live HTTP session count. Useful for sysadmin monitoring to detect a degraded cache from the MCP side without instrumenting the cache backend directly.
+
+Don't use `/health` as a liveness probe. During a Valkey outage the server keeps serving, uncached, while `/health` returns 503, so a liveness probe on it would restart every replica for a fault a restart can't fix. In Kubernetes:
+
+```yaml
+livenessProbe:
+  httpGet: { path: /livez, port: 3001 }
+  periodSeconds: 10
+  failureThreshold: 3
+readinessProbe:
+  httpGet: { path: /health, port: 3001 }
+  periodSeconds: 10
+  failureThreshold: 3
+```
+
+Using `/health` for readiness takes a pod out of the Service while its cache is unreachable. If every replica shares one Valkey, that drains them all at once. If you'd rather keep serving uncached, use `/livez` for readiness too. The image's Docker `HEALTHCHECK` stays on `/health`: Docker never restarts a container because its healthcheck fails, so there it only reports status.
 
 ---
 

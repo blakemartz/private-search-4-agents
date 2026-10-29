@@ -135,9 +135,10 @@ containerised deployment) **must** set the token, or every tool is reachable by 
 can route to the port, including the arbitrary-URL `fetch_url` and, with `SEARXNG_MCP_ADMIN_TOOLS=true`, the
 destructive `clear_cache`. The startup guard logs a warning for exactly that combination.
 
-When set, all requests except `GET /health` require `Authorization: Bearer <token>`; failures
-get a `401` with `WWW-Authenticate: Bearer`. `/health` is exempt on purpose — it is the
-container healthcheck and returns no secrets. Tokens are compared as SHA-256 digests so the
+When set, all requests except `GET /livez` and `GET /health` require `Authorization: Bearer <token>`;
+failures get a `401` with `WWW-Authenticate: Bearer`. Both probes are exempt on purpose: `/livez` is
+process liveness (checks no dependency), `/health` is readiness (503 while Valkey is unreachable),
+and neither takes input or returns secrets. Tokens are compared as SHA-256 digests so the
 check is constant-time and total (a raw `timingSafeEqual` throws on a length mismatch).
 
 Do not add authorization decisions here. There is no per-caller identity model — the token
