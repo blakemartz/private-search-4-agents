@@ -106,7 +106,7 @@ services:
 
       # ── The two switches that make this rung CLEAN ──────────────────────────
       #
-      # Both env vars below have NON-EMPTY DEFAULTS in src/config.ts. Left
+      # Both env vars below have NON-EMPTY DEFAULTS in src/core/config.ts. Left
       # alone, searxng-mcp would spend this entire rung talking to services that
       # are not deployed:
       #

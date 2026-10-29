@@ -3,17 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../src/cache.js", () => ({
+vi.mock("../../src/core/cache.js", () => ({
   getValkey: vi.fn(),
   cacheGet: vi.fn(),
   cacheAtomicUpdate: vi.fn(),
 }));
 
-import { getValkey } from "../../src/cache.js";
 import { runRestore } from "../../src/cli/restore-domain-db.js";
-import type { DomainRecord } from "../../src/domain-db.js";
-import type { RestoreClient } from "../../src/domain-snapshot.js";
-import { writeSnapshot } from "../../src/domain-snapshot.js";
+import { getValkey } from "../../src/core/cache.js";
+import type { DomainRecord } from "../../src/domains/db.js";
+import type { RestoreClient } from "../../src/domains/snapshot.js";
+import { writeSnapshot } from "../../src/domains/snapshot.js";
 
 const getValkeyMock = vi.mocked(getValkey);
 const NOW = Date.now();

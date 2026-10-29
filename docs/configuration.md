@@ -52,6 +52,7 @@ All service URLs are configurable via environment variables.
 | `YOUTUBE_IGNORE_ROBOTS` | `false` | Opt into fetching YouTube transcripts despite YouTube's `robots.txt` disallowing `/api/`. Default respects robots (fast path stays dormant, falls through to the cascade). |
 | `REDDIT_FASTPATH_ENABLED` | `true` | Enables the Reddit `.json` fast path in `fetch_url`. Set to `false` to disable. |
 | `REDDIT_IGNORE_ROBOTS` | `false` | Opt into fetching Reddit `.json` despite Reddit's `robots.txt` (`Disallow: /`). Default respects robots (fast path stays dormant, falls through to the cascade). |
+| `DOMAINS_CONFIG_PATH` | `<package root>/domains.json` | Path to the domain rules file (boost/block lists, profiles, `llms_txt` allowlist, `tier_skip`). Point it at a mounted file — a Kubernetes ConfigMap, say — to change the rules without rebuilding the image. Polled every 5 s, so edits and ConfigMap updates (atomic symlink swaps) apply without a restart. A missing or malformed file means no rules, not a crash. |
 | `SEARXNG_MCP_TRANSPORT` | `stdio` | Transport mode: `stdio` (default, single-client) or `http` (shared HTTP/SSE server). |
 | `SEARXNG_MCP_PORT` | `3001` | HTTP listen port (HTTP transport mode only). |
 | `SEARXNG_MCP_HOST` | `127.0.0.1` | HTTP listen address (HTTP transport mode only). |

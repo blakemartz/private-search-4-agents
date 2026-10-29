@@ -126,7 +126,7 @@ See [`docker/adblock-proxy/`](../docker/adblock-proxy/) for the service definiti
 
 ## Raw-first cascade order
 
-The cascade *list* is tier 2 (Crawl4AI) then tier 3 (raw HTTP + Readability), but it *runs* raw first (`orderTiers` in `src/fetch.ts`). A raw result is accepted when it extracts at least 1,500 chars of prose; anything thinner — a JS shell, a "please enable JavaScript" page — falls through to Crawl4AI, and is kept as the answer if Crawl4AI then fails too. `wait_for_selector` keeps the browser first (waiting only means something on a rendered page), as does `FETCH_RAW_FIRST=false`.
+The cascade *list* is tier 2 (Crawl4AI) then tier 3 (raw HTTP + Readability), but it *runs* raw first (`orderTiers` in `src/fetch/fetch-page.ts`). A raw result is accepted when it extracts at least 1,500 chars of prose; anything thinner — a JS shell, a "please enable JavaScript" page — falls through to Crawl4AI, and is kept as the answer if Crawl4AI then fails too. `wait_for_selector` keeps the browser first (waiting only means something on a rendered page), as does `FETCH_RAW_FIRST=false`.
 
 Why: measured 2026-10-28 on twelve documentation pages, raw found the answer on all twelve at 0.5–2s against Crawl4AI's 1.2–3.4s; Crawl4AI missed the answer on one page and errored on another. On the held-out benchmark with a cold cache, `fetch_url` `query` went from a 3.5s to a 1.5s median and highlights from 7.5s to 5.4s, answer rate unchanged at 100%.
 
@@ -260,14 +260,14 @@ The manifest cache can be cleared with the admin tool `clear_cache(target="crawl
 
 ## Passages
 
-`search` with `content: "highlights"` and `fetch_url` with `query` return the passages of a page most relevant to a question rather than its head (`src/passages.ts`):
+`search` with `content: "highlights"` and `fetch_url` with `query` return the passages of a page most relevant to a question rather than its head (`src/search/passages.ts`):
 
 1. **Chunk.** The stored markdown is split on blank lines and paragraphs are packed into ~700-char chunks; a longer paragraph is split on its own, at a sentence or line break where one is near. Each chunk keeps its character offset, so a passage can be followed up with `fetch_url` `offset`.
 2. **Clean and filter.** Each chunk is reduced to prose (link targets, image syntax, heading/emphasis markers, permalink glyphs removed). Chunks under 80 chars of prose, or where prose is under 40% of the raw chunk — nav menus, tables of contents — are dropped.
 3. **Score.** The remaining chunks (prefiltered by term overlap to at most 64 on long pages) are scored against the query by the same local cross-encoder that reranks search results (`RERANKER_URL`, `/v1/rerank`).
 4. **Fallback.** With no reranker, or when it errors, chunks are scored by term overlap (the fraction of the query's distinct terms present). That is a much weaker signal, and the output says so: `fetch_url` prints `ranked by term overlap — reranker unavailable` instead of `ranked by the local reranker`.
 
-`find` is separate and purely literal (`src/paging.ts`): case-insensitive matches, `|` for alternatives, ±300 chars of context, overlapping windows merged, at most 8 passages.
+`find` is separate and purely literal (`src/fetch/paging.ts`): case-insensitive matches, `|` for alternatives, ±300 chars of context, overlapping windows merged, at most 8 passages.
 
 ## Wayback Machine fallback
 
@@ -305,12 +305,12 @@ After any tier returns content with raw HTML, a post-extraction pass improves ti
 
 - **JSON-LD Article extraction** — Schema.org `Article` / `NewsArticle` / `BlogPosting` / `TechArticle` blocks supply cleaner `headline` and `articleBody` than scraping the rendered page (size-capped at 1 MB per script tag).
 - **Title cascade** — falls back through `og:title` → `twitter:title` → `<title>` (with publisher-suffix stripping) → first `<h1>` → URL.
-- **Markdown, not plain text** — when Readability wins (tiers 2 and 3, and the Kiwix path), its cleaned article element is converted to markdown (`src/extractors/markdown.ts`, via `turndown`): ATX headings, paragraphs, lists, fenced code with the language from `language-x`/`lang-x`/`data-lang`, absolute links (same-page anchors dropped, only the first link to a URL kept), blockquotes, GFM tables, images as alt text.
+- **Markdown, not plain text** — when Readability wins (tiers 2 and 3, and the Kiwix path), its cleaned article element is converted to markdown (`src/fetch/extractors/markdown.ts`, via `turndown`): ATX headings, paragraphs, lists, fenced code with the language from `language-x`/`lang-x`/`data-lang`, absolute links (same-page anchors dropped, only the first link to a URL kept), blockquotes, GFM tables, images as alt text.
 - **Tier-2 Readability comparison** — when Crawl4AI returns markdown, JSDOM+Readability also runs over its raw HTML. Both candidates are compared on prose length (link targets and markdown syntax stripped). Readability wins when it keeps at least **40%** of the tier's prose — it exists to drop navigation and footers, so on a good page it is shorter by design (real articles measured 0.56–0.94, genuine Readability failures 0.03–0.11) — or unconditionally when the tier's own prose is under 500 chars.
 
 ## Authority prior
 
-The cross-encoder's scores saturate: for a typical developer question five or six on-topic results all score 0.98–1.00, so their order is noise plus recency, and the official documentation (often 0.93–0.98) lands below blog posts. Ranking therefore adds a small, bounded prior (`src/authority.ts`):
+The cross-encoder's scores saturate: for a typical developer question five or six on-topic results all score 0.98–1.00, so their order is noise plus recency, and the official documentation (often 0.93–0.98) lands below blog posts. Ranking therefore adds a small, bounded prior (`src/search/authority.ts`):
 
 | Signal | Bonus (before weight) |
 |---|---|
@@ -354,7 +354,7 @@ Thresholds are model-dependent and not comparable across rerankers. When the rer
 - **Cache never hangs a search.** The Valkey client is bounded by `CACHE_COMMAND_TIMEOUT_MS`/`CACHE_CONNECT_TIMEOUT_MS`/`CACHE_MAX_RETRIES_PER_REQUEST` (see [Configuration](configuration.md)). A stalled or CPU-spiked cache backend now rejects the command instead of hanging forever — the existing fail-soft handling degrades that rejection to a cache miss (serve live) rather than throwing. Cache connect failures, client errors, and per-command errors emit a throttled `[searxng-mcp]` stderr line (deduped per key so a sustained outage leaves a periodic breadcrumb, not a flood) — stderr is always on, and is the sink that never depends on configuration. On the forge deployment OTel and NATS are also wired (`OTEL_EXPORTER_OTLP_ENDPOINT` and `NATS_URL` are both set, and the startup capability line reports `otel,nats` in its on-list), so stderr is the floor rather than the whole story.
 - **Process crash handlers** — `uncaughtException` logs then exits 1, so the supervisor restarts cleanly (Docker's `restart: unless-stopped` on the forge deployment); `unhandledRejection` logs and continues rather than crashing the shared process silently.
 - **Graceful-degradation warnings** — the reranker fallback and the Ollama/LLM expand + summarize fallbacks emit one throttled stderr line each when they silently degrade quality (reranker unavailable, LLM backend unreachable).
-- **Version is single-sourced** from `package.json` at runtime (`src/version.ts`) — the `McpServer` version, OTel tracer/meter version, and outbound `USER_AGENT` all track it, so they can't drift independently.
+- **Version is single-sourced** from `package.json` at runtime (`src/core/version.ts`) — the `McpServer` version, OTel tracer/meter version, and outbound `USER_AGENT` all track it, so they can't drift independently.
 
 ## Observability (opt-in)
 

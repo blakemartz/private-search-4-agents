@@ -40,6 +40,16 @@ tool surface, Firecrawl configuration and the minimum Node.js version all change
 
 ### Changed
 
+- **Source tree grouped by responsibility.** The flat 40-file `src/` is now `core/` (config,
+  cache, logging, telemetry, types), `domains/` (rules, capability db, stats, snapshots),
+  `search/` (SearXNG client, reranker, authority prior, passages, LLM), `fetch/` (orchestrator,
+  SSRF guard, robots, routing, paging, crawl, plus `fastpaths/`, `tiers/`, `extractors/`) and
+  `server/` (tools, resources, HTTP transport). Imports only point down those layers, with no
+  cycles. The 1,300-line `tools.ts` is split into one module per tool under `server/tools/`.
+  `tests/` mirrors the tree. The tool surface is byte-identical (`initialize` + `tools/list` +
+  `resources/list` diffed against the previous build, with and without admin tools), and so
+  are benchmark results case by case. The entry point stays `build/src/index.js`. `pnpm build`
+  now starts from a clean `build/`, so a moved module cannot leave a stale copy behind.
 - **Rebranded as `private-search-4-agents`**, maintained separately from TadMSTR/searxng-mcp
   (MIT, credited). Private package, not published to npm or GHCR; `searxng-mcp` kept as a bin
   alias. MCP server name, User-Agent and CODEOWNERS point at the new repo; upstream publishing
@@ -49,7 +59,7 @@ tool surface, Firecrawl configuration and the minimum Node.js version all change
 
 - **PDF text extraction is back, locally.** Removing Firecrawl left no tier that could read a
   PDF: Crawl4AI renders it in a browser and finds no text, and tier 3 rejected it. A new fast
-  path (`src/pdf.ts`) extracts PDF text in-process with `unpdf` — keyless, no service. It takes
+  path (`src/fetch/fastpaths/pdf.ts`) extracts PDF text in-process with `unpdf` — keyless, no service. It takes
   `.pdf` URLs directly and finds extensionless PDFs (`arxiv.org/pdf/<id>`) by the existing
   `HEAD` probe's `Content-Type`; runs after the robots gate and SSRF pre-check, fetches through
   `safeFetch` with each redirect hop re-checked; reads the body as bytes under `PDF_MAX_BYTES`
@@ -61,6 +71,12 @@ tool surface, Firecrawl configuration and the minimum Node.js version all change
   `PDF_EXTRACT_ENABLED=false` is the kill switch; the startup line now reports `pdf` as `on`.
 
 ### Fixed
+
+- **The container image had no domain rules.** `domains.json` (boosts, blocks, profiles, the
+  llms.txt allowlist) was found by a fixed `../../` path and never copied into the image, so
+  every container ran with none of them. It is now located from the package root, shipped in
+  the image, and can be pointed at a mounted file (a Kubernetes ConfigMap, say) with the new
+  `DOMAINS_CONFIG_PATH`; it is still re-read within 5 s of a change.
 
 - **Readability lost to site chrome on well-formed pages.** `preferReadability` required
   Readability's output to be *longer* than the tier's markdown, but Readability exists to drop

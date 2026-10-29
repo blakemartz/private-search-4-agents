@@ -40,8 +40,10 @@ ENV NODE_ENV=production \
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
-# Read at runtime by src/version.ts.
-COPY package.json ./
+# Read at runtime: package.json by src/core/version.ts, domains.json (boost/block
+# lists, profiles, llms.txt allowlist) by src/domains/rules.ts. Override the
+# rules with a mounted file and DOMAINS_CONFIG_PATH.
+COPY package.json domains.json ./
 
 # uid/gid 1000, provided by the base image.
 USER node

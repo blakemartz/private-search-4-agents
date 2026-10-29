@@ -92,7 +92,7 @@ function clearEnv() {
 }
 
 async function loadSearch() {
-  vi.doMock("../../src/cache.js", () => ({
+  vi.doMock("../../src/core/cache.js", () => ({
     cacheGet: vi.fn().mockResolvedValue(null),
     cacheSet: vi.fn().mockResolvedValue(undefined),
     searchCacheKey: vi.fn().mockReturnValue("k"),
@@ -100,19 +100,19 @@ async function loadSearch() {
     cacheClear: vi.fn(),
     cacheAtomicUpdate: vi.fn(),
   }));
-  vi.doMock("../../src/observability.js", () => ({
+  vi.doMock("../../src/core/observability.js", () => ({
     withSpan: vi.fn().mockImplementation((_n, _a, fn) => fn()),
     incCounter: vi.fn(),
     recordHistogram: vi.fn(),
   }));
   const searxFailover = vi.fn();
-  vi.doMock("../../src/events.js", () => ({
+  vi.doMock("../../src/core/events.js", () => ({
     events: new Proxy(
       { searxFailover },
       { get: (t, p) => (p in t ? t[p as "searxFailover"] : vi.fn()) },
     ),
   }));
-  const { searxSearchSingle } = await import("../../src/search.js");
+  const { searxSearchSingle } = await import("../../src/search/searxng.js");
   return { searxSearchSingle, searxFailover };
 }
 

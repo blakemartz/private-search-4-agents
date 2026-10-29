@@ -2,7 +2,6 @@
 import { createServer } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { logCapabilities } from "./capabilities.js";
 import {
   ADMIN_TOOLS_ENABLED,
   HTTP_AUTH_TOKEN,
@@ -10,14 +9,18 @@ import {
   HTTP_PORT,
   isLoopbackHost,
   TRANSPORT,
-} from "./config.js";
-import { initEvents, shutdownEvents } from "./events.js";
-import { createHttpRequestListener } from "./http-transport.js";
-import { logError, logWarn } from "./log.js";
-import { initObservability, shutdownObservability } from "./observability.js";
-import { registerResources } from "./resources.js";
-import { registerTools, SERVER_INSTRUCTIONS } from "./tools.js";
-import { VERSION } from "./version.js";
+} from "./core/config.js";
+import { initEvents, shutdownEvents } from "./core/events.js";
+import { logError, logWarn } from "./core/log.js";
+import {
+  initObservability,
+  shutdownObservability,
+} from "./core/observability.js";
+import { VERSION } from "./core/version.js";
+import { logCapabilities } from "./server/capabilities.js";
+import { createHttpRequestListener } from "./server/http-transport.js";
+import { registerResources } from "./server/resources.js";
+import { registerTools, SERVER_INSTRUCTIONS } from "./server/tools/index.js";
 
 // This is a single long-lived HTTP process serving all agents. Before these
 // handlers, a fault anywhere took searxng down for everyone with nothing logged

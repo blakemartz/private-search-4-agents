@@ -86,7 +86,7 @@ const clearEnv = () => {
 };
 
 async function loadSearch() {
-  vi.doMock("../../src/cache.js", () => ({
+  vi.doMock("../../src/core/cache.js", () => ({
     cacheGet: vi.fn().mockResolvedValue(null),
     cacheSet: vi.fn().mockResolvedValue(undefined),
     searchCacheKey: vi.fn().mockReturnValue("k"),
@@ -96,7 +96,7 @@ async function loadSearch() {
   }));
   const searxFailover = vi.fn();
   const errorEvent = vi.fn();
-  vi.doMock("../../src/events.js", () => ({
+  vi.doMock("../../src/core/events.js", () => ({
     events: new Proxy(
       { searxFailover, error: errorEvent },
       {
@@ -104,7 +104,7 @@ async function loadSearch() {
       },
     ),
   }));
-  const { searxSearchSingle } = await import("../../src/search.js");
+  const { searxSearchSingle } = await import("../../src/search/searxng.js");
   return { searxSearchSingle, searxFailover, errorEvent };
 }
 
@@ -183,22 +183,22 @@ describe("credentialed SEARXNG_URL — real fetch", () => {
     const port = await deadPort();
     process.env.SEARXNG_URL = `http://${USER}:${SECRET}@127.0.0.1:${port}`;
 
-    vi.doMock("../../src/observability.js", () => ({
+    vi.doMock("../../src/core/observability.js", () => ({
       withSpan: vi.fn().mockImplementation((_n, _a, fn) => fn()),
       incCounter: vi.fn(),
       recordHistogram: vi.fn(),
     }));
-    vi.doMock("../../src/reranker.js", () => ({
+    vi.doMock("../../src/search/reranker.js", () => ({
       rerankWithFallback: vi.fn().mockImplementation((_q, r) => r),
     }));
     const errorEvent = vi.fn();
-    vi.doMock("../../src/events.js", () => ({
+    vi.doMock("../../src/core/events.js", () => ({
       events: new Proxy(
         { error: errorEvent },
         { get: (t, p) => (p in t ? t[p as "error"] : vi.fn()) },
       ),
     }));
-    vi.doMock("../../src/cache.js", () => ({
+    vi.doMock("../../src/core/cache.js", () => ({
       cacheGet: vi.fn().mockResolvedValue(null),
       cacheSet: vi.fn().mockResolvedValue(undefined),
       searchCacheKey: vi.fn().mockReturnValue("k"),
@@ -207,7 +207,7 @@ describe("credentialed SEARXNG_URL — real fetch", () => {
       cacheAtomicUpdate: vi.fn(),
     }));
 
-    const { handleSearch } = await import("../../src/tools.js");
+    const { handleSearch } = await import("../../src/server/tools/index.js");
     await expect(
       handleSearch({ query: "q", num_results: 3 }),
     ).rejects.toThrow();
@@ -221,7 +221,7 @@ describe("credentialed SEARXNG_URL — real fetch", () => {
     const p2 = await deadPort();
     process.env.SEARXNG_URL = `http://${USER}:${SECRET}@127.0.0.1:${p1},http://${USER}:${SECRET}@127.0.0.1:${p2}`;
 
-    const { resetLogThrottle } = await import("../../src/log.js");
+    const { resetLogThrottle } = await import("../../src/core/log.js");
     resetLogThrottle();
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 

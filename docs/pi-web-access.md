@@ -67,7 +67,7 @@ configured, every `web_search` call was one unranked SearXNG query.
 
 ## How search works here
 
-`search` (`src/search.ts`) is a different procedure, not a different endpoint:
+`search` (`src/search/searxng.ts`) is a different procedure, not a different endpoint:
 
 1. **Cache lookup.** Valkey key over `query|engines|site` + category + time range, default TTL
    3600 s. Skipped when `expand` is on, since expansion is the point of the call.
@@ -81,7 +81,7 @@ configured, every `web_search` call was one unranked SearXNG query.
 5. **Rerank.** Every candidate is scored by the local cross-encoder at `RERANKER_URL`
    (`/v1/rerank`), then sorted on `relevance_score + RERANK_RECENCY_WEIGHT × recencyScore(date)`.
    `min_score` filters on the **raw** relevance, not the recency-adjusted value
-   (`src/reranker.ts:45-72`).
+   (`src/search/reranker.ts:45-72`).
 6. **Filter and record.** `domain_profile` filters apply after rerank (and after cache read, so
    profile edits take effect immediately); each result domain is recorded in the domain capability
    database as "seen in search".
@@ -115,10 +115,10 @@ corrections and suggestions as separate fields rather than as one concatenated s
 ### The three that actually mattered
 
 **PDFs.** This is the one real loss (since restored locally — see "If PDFs come back" below). `searxng-mcp` cannot extract PDF text and says so: the PDF
-fast path was deliberately removed (`src/fetch.ts:523`), Firecrawl is the only tier that can do it
+fast path was deliberately removed (`src/fetch/fetch-page.ts:523`), Firecrawl is the only tier that can do it
 and it is stopped here, v1 has no PDF support (`src/firecrawl-api.ts:82-83`), and Crawl4AI renders
 the PDF in a browser, finds no text nodes, and misfires its anti-bot heuristic — so tier 3 rejects
-it outright with "PDF content cannot be extracted by raw fetch" (`src/tiers/raw.ts:99`).
+it outright with "PDF content cannot be extracted by raw fetch" (`src/fetch/tiers/raw.ts:99`).
 pi-web-access extracted PDFs locally with `unpdf` (`pdf-extract.ts:155`), no key required.
 
 **`source_check`.** Nothing here produces a bounded, machine-readable evidence artifact with exact
@@ -186,7 +186,7 @@ Nothing reads it now. Before deleting it, confirm `crawl4aiApiToken` is present 
 
 ## If PDFs come back
 
-> **Done (option 2), 2026-10-28.** `src/pdf.ts` is a `unpdf` fast path ahead of the cascade —
+> **Done (option 2), 2026-10-28.** `src/fetch/fastpaths/pdf.ts` is a `unpdf` fast path ahead of the cascade —
 > see [PDF fast path](architecture.md#pdf-fast-path). The rest of this section is kept as the
 > record of the options weighed.
 
@@ -196,8 +196,8 @@ In rough order of effort:
    (`src/firecrawl-api.ts:82-83`). This is the path the code was written for; `~/dev/websearch/`
    still has `firecrawl_start.sh`, volumes and config. Read that directory's README first — it
    documents why it was stopped.
-2. **Add a `unpdf`-based fast path** to `src/fetch.ts`, ahead of the cascade, keyed on the same
-   `%PDF-` signature check that `src/tiers/raw.ts:99` uses to reject. Small, keyless, and it is
+2. **Add a `unpdf`-based fast path** to `src/fetch/fetch-page.ts`, ahead of the cascade, keyed on the same
+   `%PDF-` signature check that `src/fetch/tiers/raw.ts:99` uses to reject. Small, keyless, and it is
    exactly what the removed extension did.
 3. **Keep a minimal Pi extension** that registers a single `pdf_extract` tool. Cheapest to write,
    but it puts a second fetcher back in the picture — the thing this removal was meant to end.

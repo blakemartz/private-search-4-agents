@@ -12,19 +12,19 @@
 //   2. A durable dated JSON snapshot (+ retention pruning) so learned domain
 //      knowledge survives a Valkey flush / TTL expiry.
 
-import { getValkey } from "../cache.js";
+import { getValkey } from "../core/cache.js";
 import {
   DOMAIN_DB_SNAPSHOT_DIR,
   DOMAIN_DB_SNAPSHOT_RETENTION,
-} from "../config.js";
-import { SCHEMA_VERSION } from "../domain-db.js";
-import { pruneSnapshots, writeSnapshot } from "../domain-snapshot.js";
+} from "../core/config.js";
+import { SCHEMA_VERSION } from "../domains/db.js";
+import { pruneSnapshots, writeSnapshot } from "../domains/snapshot.js";
 import {
   aggregateDomainStats,
   type DomainAggregate,
   enumerateDomains,
   type TierSlotName,
-} from "../domain-stats.js";
+} from "../domains/stats.js";
 
 export interface GaugeData {
   domains_tracked: number;

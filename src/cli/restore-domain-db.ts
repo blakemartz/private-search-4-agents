@@ -7,14 +7,14 @@
 //
 // Usage: pnpm restore-domain-db   (reads DOMAIN_DB_SNAPSHOT_DIR)
 
-import { getValkey } from "../cache.js";
-import { DOMAIN_DB_SNAPSHOT_DIR } from "../config.js";
+import { getValkey } from "../core/cache.js";
+import { DOMAIN_DB_SNAPSHOT_DIR } from "../core/config.js";
 import {
   applyRestore,
   loadLatestSnapshot,
   type RestoreClient,
   type RestoreResult,
-} from "../domain-snapshot.js";
+} from "../domains/snapshot.js";
 
 export interface RestoreRunResult extends RestoreResult {
   snapshotCreated: string | null;

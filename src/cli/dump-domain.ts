@@ -2,8 +2,8 @@
 // Operator CLI: pretty-print the domain capability record for a hostname.
 // Usage: pnpm dump-domain docs.anthropic.com
 
-import { getDomainRecord, normalizeHostname } from "../domain-db.js";
-import { formatDomainRecord } from "../domain-stats.js";
+import { getDomainRecord, normalizeHostname } from "../domains/db.js";
+import { formatDomainRecord } from "../domains/stats.js";
 
 export async function main(): Promise<number> {
   const target = process.argv[2];

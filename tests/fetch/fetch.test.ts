@@ -1,0 +1,264 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { assertPublicUrl, rawFetch } from "../../src/fetch/fetch-page.js";
+
+describe("assertPublicUrl", () => {
+  it("accepts a normal public HTTPS URL", () => {
+    expect(() => assertPublicUrl("https://example.com/page")).not.toThrow();
+  });
+
+  it("accepts a normal public HTTP URL", () => {
+    expect(() => assertPublicUrl("http://example.com/page")).not.toThrow();
+  });
+
+  it("throws on localhost", () => {
+    expect(() => assertPublicUrl("http://localhost/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on 127.0.0.1", () => {
+    expect(() => assertPublicUrl("http://127.0.0.1/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on 0.0.0.0", () => {
+    expect(() => assertPublicUrl("http://0.0.0.0/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on 10.x.x.x", () => {
+    expect(() => assertPublicUrl("http://10.0.0.1/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on 192.168.x.x", () => {
+    expect(() => assertPublicUrl("http://192.168.1.1/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on 172.16.x.x (RFC 1918 range)", () => {
+    expect(() => assertPublicUrl("http://172.16.0.1/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on 172.31.x.x (RFC 1918 range boundary)", () => {
+    expect(() => assertPublicUrl("http://172.31.255.255/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("accepts 172.15.x.x (just outside RFC 1918 range)", () => {
+    expect(() => assertPublicUrl("http://172.15.0.1/page")).not.toThrow();
+  });
+
+  it("throws on host.docker.internal", () => {
+    expect(() => assertPublicUrl("http://host.docker.internal/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on ::1 (IPv6 loopback)", () => {
+    expect(() => assertPublicUrl("http://[::1]/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on [0:0:0:0:0:0:0:1] (IPv6 full-form loopback, bracket notation)", () => {
+    expect(() => assertPublicUrl("http://[0:0:0:0:0:0:0:1]/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on [fc00::] (IPv6 ULA fc range, bracket notation)", () => {
+    expect(() => assertPublicUrl("http://[fc00::]/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on [fd00::] (IPv6 ULA fd range, bracket notation)", () => {
+    expect(() => assertPublicUrl("http://[fd00::]/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on [fe80::] (IPv6 link-local, bracket notation)", () => {
+    expect(() => assertPublicUrl("http://[fe80::]/page")).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+
+  it("throws on non-http protocol", () => {
+    expect(() => assertPublicUrl("ftp://example.com/page")).toThrow(
+      "Only http/https URLs are supported",
+    );
+  });
+
+  // Alternate IPv4 literal encodings are normalized to canonical dotted-decimal
+  // by the WHATWG URL parser before the isIP()/classify check runs, so they must
+  // still be blocked. Guards against a future URL-parsing change silently
+  // reopening the bypass (audit INFO).
+  it.each([
+    "http://0x7f000001/", // hex → 127.0.0.1
+    "http://2130706433/", // decimal integer → 127.0.0.1
+    "http://0177.0.0.1/", // octal first octet → 127.0.0.1
+  ])("throws on alternate IPv4 literal %s", (url) => {
+    expect(() => assertPublicUrl(url)).toThrow(
+      "Internal/private addresses are not allowed",
+    );
+  });
+});
+
+describe("rawFetch", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("refuses internal/private addresses (SSRF-08 defensive guard)", async () => {
+    // The export shouldn't be a footgun — even if a caller bypasses fetchPage,
+    // the SSRF guard fires.
+    await expect(rawFetch("http://10.0.0.1/admin")).rejects.toThrow(
+      /Internal\/private addresses are not allowed/,
+    );
+    // fetch should never be called when assertPublicUrl throws first.
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("returns readable prose when Readability parses successfully", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        `<html><head><title>Test Article</title></head><body><article><p>Article content here with enough text to parse.</p></article></body></html>`,
+        { status: 200 },
+      ),
+    );
+    const result = await rawFetch("https://example.com/article");
+    expect(result.url).toBe("https://example.com/article");
+    expect(result.title).toBe("Test Article");
+    expect(result.text).not.toMatch(/<[^>]+>/); // no HTML tags — Readability extracted prose
+    expect(result.text).toContain("Article content");
+  });
+
+  it("falls back to raw HTML when Readability returns null", async () => {
+    // A minimal page Readability won't parse as an article (no content body)
+    const html = `<html><body><div class="app" id="root"></div></body></html>`;
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(html, { status: 200 }));
+    const result = await rawFetch("https://example.com/spa");
+    expect(result.url).toBe("https://example.com/spa");
+    // Falls back to raw html slice
+    expect(result.text.length).toBeGreaterThan(0);
+    expect(result.text).toContain("html");
+  });
+
+  it("renders a JSON body as a fenced block instead of running Readability", async () => {
+    // Readability over JSON finds no article, falls through to returning the
+    // raw string, and reports the URL as the title — so the caller paid for a
+    // DOM parse to get an unformatted blob back.
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response('{"name":"express","dist-tags":{"latest":"5.0.0"}}', {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const result = await rawFetch("https://registry.npmjs.org/express");
+    expect(result.text).toContain("```json");
+    expect(result.text).toContain('"name": "express"'); // re-indented
+    expect(result.html).toBeUndefined(); // no HTML for post-extraction to sample
+  });
+
+  it("fences xml and passes plain text through bare", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response("<rss><channel/></rss>", {
+        status: 200,
+        headers: { "content-type": "application/rss+xml" },
+      }),
+    );
+    expect((await rawFetch("https://example.com/feed")).text).toBe(
+      "```xml\n<rss><channel/></rss>\n```",
+    );
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response("User-agent: *\nDisallow:", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      }),
+    );
+    expect((await rawFetch("https://example.com/robots.txt")).text).toBe(
+      "User-agent: *\nDisallow:",
+    );
+  });
+
+  it("still parses HTML that a server mislabels as text/plain", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        `<html><head><title>Mislabelled</title></head><body><article><p>Article content here with enough text to parse.</p></article></body></html>`,
+        { status: 200, headers: { "content-type": "text/plain" } },
+      ),
+    );
+    const result = await rawFetch("https://example.com/mislabelled");
+    expect(result.title).toBe("Mislabelled");
+    expect(result.text).toContain("Article content");
+    expect(result.text).not.toContain("```");
+  });
+
+  it("throws on redirect", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://example.com/other" },
+      }),
+    );
+    const err = await rawFetch("https://example.com/page").catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toMatch(/Redirect not followed/);
+    // Sanitized error message must not echo the Location header back to the
+    // caller — would surface internal addresses on a misconfigured redirect (OE-02).
+    expect(err.message).not.toContain("example.com/other");
+  });
+
+  it("throws on non-ok response", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(null, { status: 404, statusText: "Not Found" }),
+    );
+    await expect(rawFetch("https://example.com/missing")).rejects.toThrow(
+      "Raw fetch error: 404",
+    );
+  });
+
+  it("scopes extraction to target_selector, excluding out-of-selector content", async () => {
+    const html = `<html><body><nav>NAVNOISE menu links</nav><main><article><p>${"Real article body text. ".repeat(
+      20,
+    )}</p></article></main><footer>FOOTERNOISE copyright</footer></body></html>`;
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(html, { status: 200 }));
+    const result = await rawFetch("https://example.com/a", 8000, {
+      targetSelector: "article",
+    });
+    expect(result.text).toContain("Real article body");
+    expect(result.text).not.toContain("NAVNOISE");
+    expect(result.text).not.toContain("FOOTERNOISE");
+  });
+
+  it("falls back to full-page extraction when target_selector matches nothing", async () => {
+    const html = `<html><head><title>T</title></head><body><article><p>${"Body content paragraph. ".repeat(
+      20,
+    )}</p></article></body></html>`;
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(html, { status: 200 }));
+    const result = await rawFetch("https://example.com/b", 8000, {
+      targetSelector: ".no-such-element",
+    });
+    expect(result.text).toContain("Body content");
+  });
+});
+
+// `isPdfUrl` and its five tests were deleted with the PDF fast path
+// (vikunja#682). Suffix matching was never the right predicate — it missed every
+// PDF served from an extensionless URL, and those hit the tier-3 rejection
+// instead. PDF handling is now keyed on Content-Type plus the `%PDF-` body
+// signature, covered in tests/fetch/tiers/raw-pdf.test.ts.

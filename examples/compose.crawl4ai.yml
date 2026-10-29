@@ -22,7 +22,7 @@
 #
 # READ `unverified` CORRECTLY. It means "configured, and this process has not
 # contacted it" — nothing probes at startup, so it is the honest absence of a
-# health claim, not a warning. See src/capabilities.ts.
+# health claim, not a warning. See src/server/capabilities.ts.
 #
 # `reranker` reads `off` here only because this file sets RERANKER_URL="" below.
 # Leave that line out and it would read `unverified` with no reranker deployed

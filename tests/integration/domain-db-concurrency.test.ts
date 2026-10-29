@@ -1,7 +1,7 @@
 // Concurrency proof for the domain-db write path, against a REAL Valkey.
 //
 // This exists because the unit-level equivalent could not have caught the bug
-// it is here to prevent. `tests/domain-db.test.ts` stubs `cacheAtomicUpdate`
+// it is here to prevent. `tests/domains/domain-db.test.ts` stubs `cacheAtomicUpdate`
 // out with a synchronous in-process closure, and single-threaded JS serializes
 // a synchronous closure perfectly — so it asserted the contract while the
 // implementation was what failed. An in-memory emulator is no better: the
@@ -36,14 +36,14 @@ if (TEST_URL) {
   process.env.CACHE_URL = TEST_URL;
 }
 
-const { getValkey } = await import("../../src/cache.js");
+const { getValkey } = await import("../../src/core/cache.js");
 const {
   domainKey,
   getDomainRecord,
   recordMetadataFetchAttempt,
   recordPostExtractSample,
   recordTierAttempt,
-} = await import("../../src/domain-db.js");
+} = await import("../../src/domains/db.js");
 
 // Unique per run so a crashed run can't poison the next one, and so parallel
 // invocations don't collide on the scratch db.
@@ -188,7 +188,7 @@ describe.skipIf(!TEST_URL)("cacheAtomicUpdate compare-and-set", () => {
   });
 
   it("rejects a stale commit and re-applies against the stored value", async () => {
-    const { cacheAtomicUpdate } = await import("../../src/cache.js");
+    const { cacheAtomicUpdate } = await import("../../src/core/cache.js");
     const client = (await getValkey()) as Valkey;
     const key = `domain:cas-${runId}-${counter++}.test.invalid`;
     touched.push(key);
@@ -215,7 +215,7 @@ describe.skipIf(!TEST_URL)("cacheAtomicUpdate compare-and-set", () => {
   });
 
   it("refuses a create when the key appeared since the read", async () => {
-    const { cacheAtomicUpdate } = await import("../../src/cache.js");
+    const { cacheAtomicUpdate } = await import("../../src/core/cache.js");
     const client = (await getValkey()) as Valkey;
     const key = `domain:cas-create-${runId}-${counter++}.test.invalid`;
     touched.push(key);
@@ -235,7 +235,7 @@ describe.skipIf(!TEST_URL)("cacheAtomicUpdate compare-and-set", () => {
   });
 
   it("commits a create when the key really is absent", async () => {
-    const { cacheAtomicUpdate } = await import("../../src/cache.js");
+    const { cacheAtomicUpdate } = await import("../../src/core/cache.js");
     const client = (await getValkey()) as Valkey;
     const key = `domain:cas-new-${runId}-${counter++}.test.invalid`;
     touched.push(key);

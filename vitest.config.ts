@@ -19,8 +19,8 @@ export default defineConfig({
       // lines 92.53%. Both headline targets now clear: 90 lines and 85
       // branches, which is the gate ihor-sokoliuk/mcp-searxng runs.
       //
-      // Reached by adding fast-check property tests over src/ssrf-guard.ts and
-      // src/extractors/*, then hand-written branch tests for the paths those
+      // Reached by adding fast-check property tests over src/fetch/ssrf-guard.ts and
+      // src/fetch/extractors/*, then hand-written branch tests for the paths those
       // could not reach — the CAS write path in cache.ts, the CLI exit codes,
       // withSpan's credential redaction, the NATS publish hooks, and the
       // version-varying SearXNG meta shapes.

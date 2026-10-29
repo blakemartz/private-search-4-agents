@@ -3,20 +3,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../src/cache.js", () => ({
+vi.mock("../../src/core/cache.js", () => ({
   getValkey: vi.fn(),
   cacheGet: vi.fn(),
   cacheAtomicUpdate: vi.fn(),
 }));
 
-import { getValkey } from "../../src/cache.js";
 import {
   deriveGauges,
   emitGauges,
   runMaintenance,
 } from "../../src/cli/domain-db-maintenance.js";
-import { loadLatestSnapshot } from "../../src/domain-snapshot.js";
-import type { DomainAggregate } from "../../src/domain-stats.js";
+import { getValkey } from "../../src/core/cache.js";
+import { loadLatestSnapshot } from "../../src/domains/snapshot.js";
+import type { DomainAggregate } from "../../src/domains/stats.js";
 
 const getValkeyMock = vi.mocked(getValkey);
 const NOW = Date.now();

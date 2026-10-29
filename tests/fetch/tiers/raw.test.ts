@@ -1,0 +1,232 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mockFetch = vi.fn();
+vi.stubGlobal("fetch", mockFetch);
+
+import { ChallengeDetectedError } from "../../../src/fetch/challenge.js";
+import { rawFetch } from "../../../src/fetch/tiers/raw.js";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+const URL = "https://example.com/page";
+
+// A real body stream, not `body: null`. rawFetch reads through
+// readBoundedText, which streams from res.body — a null body would send it
+// down the no-reader path and test nothing that ships.
+function bodyStream(text: string): ReadableStream<Uint8Array> {
+  return new Response(text).body as ReadableStream<Uint8Array>;
+}
+
+function mockHtmlResponse(
+  html: string,
+  opts?: { status?: number; headers?: Record<string, string> },
+) {
+  const status = opts?.status ?? 200;
+  const headers = new Headers({
+    "Content-Type": "text/html",
+    ...opts?.headers,
+  });
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? "OK" : "Error",
+    headers,
+    body: bodyStream(html),
+    text: () => Promise.resolve(html),
+  };
+}
+
+const ARTICLE_HTML = `
+<html><head><title>Test Article</title></head>
+<body>
+  <article>
+    <h1>Test Article</h1>
+    <p>This is the main article content with enough text to pass Readability's scoring threshold.</p>
+    <p>More paragraph content here to ensure the article is detected properly by Readability.</p>
+  </article>
+</body></html>`;
+
+const SIMPLE_HTML = `<html><body><p>simple page</p></body></html>`;
+
+describe("rawFetch", () => {
+  it("throws on private/localhost URL (SSRF guard)", async () => {
+    await expect(rawFetch("http://localhost/page")).rejects.toThrow(
+      "Internal/private addresses are not allowed",
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("throws on 3xx redirect without echoing Location header", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 301,
+      statusText: "Moved Permanently",
+      headers: new Headers({
+        Location: "http://192.168.1.1/internal",
+      }),
+      body: null,
+      text: () => Promise.resolve(""),
+    });
+    await expect(rawFetch(URL)).rejects.toThrow("Redirect not followed (301)");
+  });
+
+  it("throws on non-2xx response", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+      headers: new Headers(),
+      body: null,
+      text: () => Promise.resolve(""),
+    });
+    await expect(rawFetch(URL)).rejects.toThrow("Raw fetch error: 404");
+  });
+
+  it("returns title and text from a simple HTML page", async () => {
+    mockFetch.mockResolvedValueOnce(mockHtmlResponse(SIMPLE_HTML));
+    const result = await rawFetch(URL);
+    expect(result.url).toBe(URL);
+    expect(typeof result.text).toBe("string");
+    expect(result.text.length).toBeGreaterThan(0);
+  });
+
+  it("returns article title when Readability successfully parses content", async () => {
+    mockFetch.mockResolvedValueOnce(mockHtmlResponse(ARTICLE_HTML));
+    const result = await rawFetch(URL, 10000);
+    expect(result.title).toBe("Test Article");
+  });
+
+  it("truncates text to maxChars", async () => {
+    mockFetch.mockResolvedValueOnce(mockHtmlResponse(ARTICLE_HTML));
+    const result = await rawFetch(URL, 10);
+    expect(result.text.length).toBeLessThanOrEqual(10);
+  });
+
+  it("throws a descriptive error on a real PDF — header AND %PDF- signature", async () => {
+    // Note the real body stream. The previous version of this test passed
+    // `body: null` with a `text()` stub, so readBoundedText took its no-reader
+    // path and returned "" — the assertion passed on the Content-Type alone and
+    // never once exercised a PDF body.
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers({ "Content-Type": "application/pdf" }),
+      body: bodyStream("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj"),
+    });
+    await expect(rawFetch(URL)).rejects.toThrow(
+      "PDF content cannot be extracted by raw fetch",
+    );
+  });
+
+  it("does not claim PDF for a body declared application/pdf that is not one", async () => {
+    // An error page or interstitial served with the wrong Content-Type. Keying
+    // on the header alone turned these into a hard "this is a PDF" failure when
+    // Readability could extract them perfectly well (vikunja#682).
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers({ "Content-Type": "application/pdf" }),
+      body: bodyStream(
+        "<html><body><article><h1>Document unavailable</h1>" +
+          "<p>The requested document has been moved to the archive.</p>" +
+          "</article></body></html>",
+      ),
+    });
+    const result = await rawFetch(URL);
+    expect(result.text).toContain("moved to the archive");
+  });
+});
+
+describe("rawFetch — PDF failure message names the real cause", () => {
+  // The old message read "use Crawl4AI", which was wrong: Crawl4AI cannot
+  // parse PDFs either. The local PDF path in fetchPage (src/fetch/fastpaths/pdf.ts) is the only
+  // PDF reader, so a PDF reaching raw fetch means that path was skipped or
+  // failed — and the message must point there, not at a backend that will not
+  // help.
+  const pdfResponse = () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: new Headers({ "Content-Type": "application/pdf" }),
+    body: bodyStream("%PDF-1.4\ntrailer"),
+  });
+
+  it("points at the local PDF path that was skipped or failed", async () => {
+    mockFetch.mockResolvedValueOnce(pdfResponse());
+    await expect(rawFetch(URL)).rejects.toThrow(
+      /local PDF path was skipped or failed.*pdf_local.*PDF_EXTRACT_ENABLED/,
+    );
+  });
+
+  it("never tells the operator to use Crawl4AI, which cannot parse PDFs", async () => {
+    mockFetch.mockResolvedValueOnce(pdfResponse());
+    await expect(rawFetch(URL)).rejects.not.toThrow(/Crawl4AI/);
+  });
+
+  it("does not point at a Firecrawl tier that no longer exists", async () => {
+    mockFetch.mockResolvedValueOnce(pdfResponse());
+    await expect(rawFetch(URL)).rejects.not.toThrow(/Firecrawl|tier 1/i);
+  });
+});
+
+// Cloudflare challenge detection at the tier3 boundary. The 200 case is the
+// one that mattered: before this, res.ok was true, Readability extracted
+// "Just a moment..." as the article, and the cascade booked a hit.
+describe("rawFetch — challenge detection", () => {
+  const INTERSTITIAL_200 = `<!DOCTYPE html><html><head>
+<title>Just a moment...</title></head><body>
+<h1>Verifying you are human. This may take a few seconds.</h1>
+<script>window._cf_chl_opt={cvId:'3'};</script>
+<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>
+</body></html>`;
+
+  it("throws ChallengeDetectedError on a 200 interstitial", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockHtmlResponse(INTERSTITIAL_200, {
+        headers: { "cf-ray": "8f2a1b3c4d5e6f70-LHR", server: "cloudflare" },
+      }),
+    );
+    await expect(rawFetch(URL)).rejects.toBeInstanceOf(ChallengeDetectedError);
+  });
+
+  it("throws ChallengeDetectedError on a 503 from a Cloudflare edge", async () => {
+    // Ahead of the generic !res.ok throw, so the attempt is recorded as
+    // challenge_detected rather than "Raw fetch error: 503".
+    mockFetch.mockResolvedValueOnce(
+      mockHtmlResponse("", {
+        status: 503,
+        headers: { "cf-ray": "8f2a1b3c4d5e6f70-LHR" },
+      }),
+    );
+    const err = await rawFetch(URL).catch((e) => e);
+    expect(err).toBeInstanceOf(ChallengeDetectedError);
+    expect(err.message).not.toContain("Raw fetch error");
+  });
+
+  it("still throws the generic error on an honest 403", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockHtmlResponse("", { status: 403, headers: { server: "nginx" } }),
+    );
+    const err = await rawFetch(URL).catch((e) => e);
+    expect(err).not.toBeInstanceOf(ChallengeDetectedError);
+    expect(err.message).toContain("Raw fetch error: 403");
+  });
+
+  it("negative control — a page using 'just a moment' in prose is still a hit", async () => {
+    const HONEST = `<html><head><title>Notes on waiting well</title></head><body>
+      <article><h1>Notes on waiting well</h1>
+      <p>Just a moment ago I was convinced the build was broken, and it was not.</p>
+      <p>Give it just a moment and the deploy settles down on its own again.</p>
+      </article></body></html>`;
+    mockFetch.mockResolvedValueOnce(
+      mockHtmlResponse(HONEST, { headers: { server: "cloudflare" } }),
+    );
+    const result = await rawFetch(URL, 10000);
+    expect(result.title).toBe("Notes on waiting well");
+    expect(result.text).toContain("Just a moment ago");
+  });
+});

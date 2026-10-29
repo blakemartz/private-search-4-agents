@@ -4,13 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // normalizeHostname and currentWindowStat — come from the real module, so the
 // formatter assertions below exercise the shipped window logic rather than a
 // local re-implementation that could drift away from it.
-vi.mock("../../src/domain-db.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/domain-db.js")>()),
+vi.mock("../../src/domains/db.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/domains/db.js")>()),
   getDomainRecord: vi.fn(),
 }));
 
 import { main } from "../../src/cli/dump-domain.js";
-import { getDomainRecord } from "../../src/domain-db.js";
+import { getDomainRecord } from "../../src/domains/db.js";
 
 const getDomainRecordMock = vi.mocked(getDomainRecord);
 

@@ -28,6 +28,10 @@ docker run --rm -p 127.0.0.1:3001:3001 \
   private-search-4-agents:local
 ```
 
+The image ships the repo's `domains.json` (domain boosts, blocks, profiles and the llms.txt
+allowlist). To change the rules without rebuilding, mount your own file (a Kubernetes ConfigMap
+works) and set `DOMAINS_CONFIG_PATH` to it; it is re-read within 5 s of a change.
+
 The `examples/compose.*.yml` files build the same image (and the reranker and adblock-proxy sidecars
 from `docker/`) instead of pulling.
 

@@ -9,12 +9,12 @@
 // results into an exit code.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../src/domain-snapshot.js", async (importOriginal) => {
+vi.mock("../../src/domains/snapshot.js", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/domain-snapshot.js")>();
+    await importOriginal<typeof import("../../src/domains/snapshot.js")>();
   return { ...actual, loadLatestSnapshot: vi.fn(), applyRestore: vi.fn() };
 });
-vi.mock("../../src/cache.js", () => ({
+vi.mock("../../src/core/cache.js", () => ({
   getValkey: vi.fn(),
   cacheGet: vi.fn(),
   cacheSet: vi.fn(),
@@ -23,9 +23,12 @@ vi.mock("../../src/cache.js", () => ({
   cachePing: vi.fn(),
 }));
 
-import { getValkey } from "../../src/cache.js";
 import { main as restoreMain } from "../../src/cli/restore-domain-db.js";
-import { applyRestore, loadLatestSnapshot } from "../../src/domain-snapshot.js";
+import { getValkey } from "../../src/core/cache.js";
+import {
+  applyRestore,
+  loadLatestSnapshot,
+} from "../../src/domains/snapshot.js";
 
 const loadLatestSnapshotMock = vi.mocked(loadLatestSnapshot);
 const applyRestoreMock = vi.mocked(applyRestore);

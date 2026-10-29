@@ -13,7 +13,8 @@
   },
   "type": "module",
   "scripts": {
-    "build": "tsc && chmod 755 build/src/index.js",
+    "clean": "node -e \"require('node:fs').rmSync('build',{recursive:true,force:true})\"",
+    "build": "pnpm clean && tsc && chmod 755 build/src/index.js",
     "test": "vitest run --typecheck",
     "test:watch": "vitest --typecheck",
     "coverage": "vitest run --coverage",

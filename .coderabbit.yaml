@@ -99,7 +99,7 @@ reviews:
         and say specifically which part no longer holds.
 
         Every outbound fetch to a caller-influenced or discovered URL goes through
-        `safeFetch` (`fetch-utils.ts`), which layers `assertPublicUrl` over a
+        `safeFetch` (`fetch/utils.ts`), which layers `assertPublicUrl` over a
         DNS-validating undici dispatcher that re-checks each redirect hop. Flag any new
         fetch path that bypasses it. The configured internal services — SearXNG,
         Crawl4AI, Ollama, the reranker, Kiwix, Hister, the solver — are
