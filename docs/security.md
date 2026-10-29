@@ -19,7 +19,7 @@ The raw-HTTP and GitHub fast-path fetches additionally use `redirect: "manual"` 
 
 ## Transport exposure
 
-stdio has no network surface. The HTTP transport binds `127.0.0.1` by default and is unauthenticated in that configuration; moving it off loopback without setting `SEARXNG_MCP_AUTH_TOKEN` exposes every tool — including arbitrary-URL `fetch_url` and destructive `clear_cache` — to anything that can route to the port. See [HTTP transport authentication](deployment.md#http-transport-authentication).
+stdio has no network surface. The HTTP transport binds `127.0.0.1` by default and is unauthenticated in that configuration; moving it off loopback without setting `SEARXNG_MCP_AUTH_TOKEN` exposes every tool — including arbitrary-URL `fetch_url` and, when `SEARXNG_MCP_ADMIN_TOOLS=true`, destructive `clear_cache` — to anything that can route to the port. See [HTTP transport authentication](deployment.md#http-transport-authentication).
 
 ## Bounded reads
 

@@ -15,7 +15,8 @@
 #   `search`'s `min_score`       now DOES something — without a reranker there
 #                                are no relevance scores to filter on, and the
 #                                parameter is a documented no-op that says so
-#   `search_and_fetch`           fetches a better top result, same mechanism
+#   highlights / fetch_url query  passages ranked by the cross-encoder, not
+#                                term overlap; content:full fetches better pages
 #   everything else              unchanged from rung 2
 #
 # No API key, no GPU, and no cold start — the model is baked into the image, and

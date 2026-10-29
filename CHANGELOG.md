@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Targets **4.0.0**, the first release of the fork as `private-search-4-agents`. Breaking: the
+tool surface, Firecrawl configuration and the minimum Node.js version all change.
+
+### Breaking
+
+- **Tool surface reshaped for agents: 7 tools → 3.** `search`, `fetch_url` and `crawl_site` are
+  registered by default; `clear_cache` and `domain_stats` only with
+  `SEARXNG_MCP_ADMIN_TOOLS=true`. `tools/list` drops from ~7.6k to ~1.8k tokens, and the server
+  now sends MCP `instructions` describing the search → fetch → page flow.
+  - `search_and_fetch` and `search_and_summarize` are removed. Use `search` with
+    `content: "full"` and `search` with `answer: true` respectively; the answer keeps the
+    leading `--- summarization unavailable (<kind>: <detail>) ---` fallback marker and carries
+    the pages on fallback.
+  - `search`: `num_results` → `max_results`, `site` → `include_domains` (now also a hard
+    filter). New: `query` accepts up to 5 phrasings (parallel, merged, deduped);
+    `content: snippets | highlights | full`, where highlights are the top pages' most relevant
+    passages picked by the local reranker; `exclude_domains`; `fresh` (cache bypass). Results
+    show date and relevance; the engine name moves to `structuredContent` only. Results scored
+    off-topic (relevance < 0.01) never have their page fetched.
+  - `fetch_url`: `url` accepts up to 5 URLs (parallel, failures isolated). Every window that is
+    not the whole page ends with a footer such as
+    `[chars 0–8,000 of 23,410 · continue with offset=8000]` — previously the cut was silent and
+    mid-word. New `offset`, `query` (reranked passages), `find` (literal passages) and `fresh`.
+    Pages are always cached at the 40,000-char store ceiling, so paging is a cache hit however
+    the page was first fetched.
+- **Firecrawl removed.** Tier 1 (Firecrawl scrape) and `crawl_site`'s Firecrawl crawl and
+  `/map` phases are gone; the cascade is fast paths → Crawl4AI (tier 2) → raw HTTP (tier 3) →
+  solver → Wayback. `FIRECRAWL_*` variables are no longer read and `crawl_site` no longer
+  reports the `firecrawl` or `map` strategies. Slot names `tier2`/`tier3` are kept; legacy
+  `tier1`/`crawl` domain-db slots are stripped on the next write without a schema bump.
+- **Node.js 22+ required** (`engines`, CI): `unpdf` declares `node >=22`.
+
+### Changed
+
+- **Rebranded as `private-search-4-agents`**, maintained separately from TadMSTR/searxng-mcp
+  (MIT, credited). Private package, not published to npm or GHCR; `searxng-mcp` kept as a bin
+  alias. MCP server name, User-Agent and CODEOWNERS point at the new repo; upstream publishing
+  workflows and the Firecrawl-only adblock browser images are dropped.
+
 ### Added
 
 - **PDF text extraction is back, locally.** Removing Firecrawl left no tier that could read a
@@ -22,6 +61,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `PDF_EXTRACT_ENABLED=false` is the kill switch; the startup line now reports `pdf` as `on`.
 
 ### Fixed
+
+- **Readability lost to site chrome on well-formed pages.** `preferReadability` required
+  Readability's output to be *longer* than the tier's markdown, but Readability exists to drop
+  navigation and footers, so on a good page it is shorter by design and Crawl4AI's raw markdown
+  (valkey.io: ~800 chars of nav before the first sentence) won. Readability now wins when it
+  keeps at least 40% of the tier's prose. Measured over ten live pages: real articles and docs
+  0.56–0.94, genuine Readability failures 0.03 and 0.11.
 
 - **Readability output was glued plain text, not markdown.** Whenever Readability won in tier 2
   or tier 3 (and on the Kiwix path), the server returned `article.textContent`, which drops

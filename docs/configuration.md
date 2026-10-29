@@ -12,12 +12,12 @@ All service URLs are configurable via environment variables.
 | `SEARXNG_UNHEALTHY_TTL_SECONDS` | `30` | How long a failed instance is deprioritised for. A hint that reorders candidates, not a circuit breaker — an unhealthy instance is moved to the back, never removed, and if every instance is marked down the full list is still tried. Stored in the cache so the hint is shared across processes; a cache outage degrades to "try every instance in configured order". |
 | `RERANKER_URL` | `http://localhost:8787` | Reranker instance URL |
 | `GITHUB_TOKEN` | *(unset)* | GitHub personal access token — increases rate limit from 60 to 5,000 req/hour |
-| `OLLAMA_URL` | *(unset)* | Ollama API base URL — required for `expand` and `search_and_summarize` |
+| `OLLAMA_URL` | *(unset)* | Ollama API base URL — required for `expand` and `search` with `answer: true` |
 | `OLLAMA_API_KEY` | *(unset)* | Bearer token for authenticated Ollama proxies — adds `Authorization: Bearer <key>` header when set |
 | `OLLAMA_EXPAND_MODEL` | `qwen3:4b` | Model used by query expansion (`expand` parameter). Override without rebuilding. |
-| `OLLAMA_SUMMARIZE_MODEL` | `qwen3:14b` | Model used by `search_and_summarize`. Override without rebuilding. |
-| `OLLAMA_SUMMARIZE_TIMEOUT_MS` | `120000` | Budget for the `search_and_summarize` LLM call. Covers queue wait, model load **and** inference — so a call that is the first in longer than the Ollama host's `OLLAMA_KEEP_ALIVE` pays a full cold model load inside it. Raise it if you run a large summarize model on a cold GPU. Invalid/non-positive values fall back to the default. |
-| `LLM_BASE_URL` | *(unset)* | OpenAI-compatible chat endpoint (e.g. vLLM, llama.cpp, LM Studio) for `expand` + `search_and_summarize`. Must include the API path — e.g. `http://host:8000/v1` — the server appends `/chat/completions`. When set, takes precedence over `OLLAMA_URL`, so an already-loaded model can be reused instead of running a separate Ollama model. |
+| `OLLAMA_SUMMARIZE_MODEL` | `qwen3:14b` | Model used for the cited synthesis returned by `search` with `answer: true`. Override without rebuilding. |
+| `OLLAMA_SUMMARIZE_TIMEOUT_MS` | `120000` | Budget for the `search` `answer: true` LLM call. Covers queue wait, model load **and** inference — so a call that is the first in longer than the Ollama host's `OLLAMA_KEEP_ALIVE` pays a full cold model load inside it. Raise it if you run a large summarize model on a cold GPU. Invalid/non-positive values fall back to the default. |
+| `LLM_BASE_URL` | *(unset)* | OpenAI-compatible chat endpoint (e.g. vLLM, llama.cpp, LM Studio) for `expand` + `search` `answer: true`. Must include the API path — e.g. `http://host:8000/v1` — the server appends `/chat/completions`. When set, takes precedence over `OLLAMA_URL`, so an already-loaded model can be reused instead of running a separate Ollama model. |
 | `LLM_MODEL` | *(unset)* | Model id for the OpenAI-compatible backend; overrides `OLLAMA_EXPAND_MODEL` / `OLLAMA_SUMMARIZE_MODEL` when set. |
 | `LLM_API_KEY` | *(unset)* | Bearer token for the OpenAI-compatible backend — adds `Authorization: Bearer <key>` when set. |
 | `LLM_DISABLE_THINKING` | `true` | Sends `chat_template_kwargs.enable_thinking: false` so reasoning models (e.g. Qwen3) return direct output. Set to `false` for servers that reject that field. |
@@ -28,8 +28,8 @@ All service URLs are configurable via environment variables.
 | `CACHE_TTL_SECONDS` | `3600` | Search result cache TTL in seconds |
 | `FETCH_CACHE_TTL_SECONDS` | `86400` | Fetched page cache TTL in seconds |
 | `CRAWL_MANIFEST_TTL_SECONDS` | `21600` | Crawl manifest and page content cache TTL in seconds (6 hours) |
-| `CRAWL_MAX_PAGES_DEFAULT` | `20` | Default max pages returned by `crawl_site` when no `max_pages` is passed |
-| `CRAWL_BFS_ENABLED` | `false` | Set to `true` to enable BFS fallback in `crawl_site` globally. Can also be enabled per-call with the `bfs` parameter. |
+| `CRAWL_MAX_PAGES_DEFAULT` | `20` | Intended default for `crawl_site`'s `max_pages`. **Currently not read:** the tool schema defaults `max_pages` to `20` itself, so changing this has no effect. |
+| `CRAWL_BFS_ENABLED` | `false` | Set to `true` to enable the BFS (link-following) fallback in `crawl_site`. Server-side only — the tool has no per-call switch. |
 | `CRAWL_BFS_MAX_DEPTH` | `3` | Maximum link-hop depth for BFS crawl |
 | `EXPAND_QUERIES` | `false` | Set to `true` to enable query expansion globally |
 | `CRAWL4AI_URL` | *(unset)* | Crawl4AI instance URL — enables tier 2, the JS-rendering first tier of the fetch cascade. Unset, fetches go straight to tier 3 (raw HTTP) |
@@ -53,6 +53,7 @@ All service URLs are configurable via environment variables.
 | `SEARXNG_MCP_TRANSPORT` | `stdio` | Transport mode: `stdio` (default, single-client) or `http` (shared HTTP/SSE server). |
 | `SEARXNG_MCP_PORT` | `3001` | HTTP listen port (HTTP transport mode only). |
 | `SEARXNG_MCP_HOST` | `127.0.0.1` | HTTP listen address (HTTP transport mode only). |
+| `SEARXNG_MCP_ADMIN_TOOLS` | `false` | Set to `true` to also register the operator tools `clear_cache` and `domain_stats`. Off by default: `clear_cache` wipes cache shared by every agent on the box, and both add schema to every agent's context. The same data is available through the `config://` / `stats://domains` resources and the `dump-domain` CLI. |
 | `SEARXNG_MCP_AUTH_TOKEN` | *(unset)* | HTTP transport only. When set, every request except `GET /health` must send `Authorization: Bearer <token>` or get a `401`. Unset (the default) disables the check entirely. **Set this whenever `SEARXNG_MCP_HOST` is not loopback** — see [HTTP transport authentication](deployment.md#http-transport-authentication). |
 | `HTTP_SESSION_IDLE_TIMEOUT_MS` | `600000` | HTTP transport only. A session idle longer than this is evicted by a background sweep (sessions with an in-flight request are exempt, so a long `crawl_site` call is never closed mid-request). Bounds session-map growth from clients killed mid-turn, which never fire `transport.onclose`. |
 | `HTTP_MAX_SESSIONS` | `256` | HTTP transport only. Hard-cap backstop — if the session map ever exceeds this, the least-recently-used idle session is evicted regardless of the idle timeout. |
@@ -62,7 +63,7 @@ All service URLs are configurable via environment variables.
 
 # Prerequisites and service setup
 
-**Runtime:** Node.js 20+, and pnpm (or npm).
+**Runtime:** Node.js 22+ (`unpdf`, the PDF extractor, requires it), and pnpm (or npm).
 
 ## Required
 
@@ -85,7 +86,7 @@ soft. Absence costs quality and latency, never correctness.
 | Service | Capability it unlocks | Turn it on with |
 |---------|----------------------|-----------------|
 | [Crawl4AI](https://github.com/unclecode/crawl4ai) — **recommended** | Fetch tier 2, the first tier of the cascade and the only one that renders JavaScript. Without it, JS-heavy pages get whatever tier 3's raw HTML holds | `CRAWL4AI_URL` |
-| [Ollama](https://ollama.com/) with `qwen3:4b` and/or `qwen3:14b`, or any OpenAI-compatible endpoint | Query expansion and LLM-synthesized summaries (`search_and_summarize`) | `OLLAMA_URL` or `LLM_BASE_URL` |
+| [Ollama](https://ollama.com/) with `qwen3:4b` and/or `qwen3:14b`, or any OpenAI-compatible endpoint | Query expansion and cited answers (`search` with `answer: true`) | `OLLAMA_URL` or `LLM_BASE_URL` |
 | [kiwix-serve](https://github.com/kiwix/kiwix-tools) | Offline serving of Wikipedia, Stack Overflow and the Arch Wiki from local ZIM archives | `KIWIX_URL` |
 | Hister | Archived-page fallback from a private archive | `HISTER_URL` |
 | [Byparr](https://github.com/ThePhaseless/Byparr) or FlareSolverr | Solves Cloudflare-style interstitials on the domains that serve them | `SOLVER_URL` + `SOLVER_ENABLED=true` |
@@ -163,7 +164,7 @@ Two other things changed in 0.9.0 that matter if you are upgrading from 0.8.x:
 
 0.9.1 and 0.9.2 have no changelog entries upstream; 0.9.3 is the version this client is written and tested against.
 
-On the `search_and_summarize` path, Crawl4AI requests use `fit_markdown` for noise-filtered content extraction. Other callers (`search_and_fetch`, `fetch_url`) use `raw_markdown`.
+Every caller (`search` content/answer modes, `fetch_url`, `crawl_site`) takes Crawl4AI's `raw_markdown`, cleaned by the Readability comparison described in [Architecture](architecture.md#fetch-quality).
 
 ## Kiwix (optional)
 
@@ -194,7 +195,7 @@ Any Redis-compatible instance. Valkey is recommended. Search results are cached 
 
 ## Ollama
 
-Required for `expand` and `search_and_summarize`. Pull the required models:
+Required for `expand` and `search` with `answer: true`. Pull the required models:
 
 ```bash
 ollama pull qwen3:4b   # query expansion

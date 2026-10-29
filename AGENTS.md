@@ -4,15 +4,14 @@ MCP server for private web search via a self-hosted SearXNG instance. Reranks re
 
 ## What it does
 
-Exposes seven MCP tools:
+Exposes three MCP tools to agents, plus two operator tools, and sends MCP server `instructions` describing the flow (`tools/list` is ~1.8k tokens). Schemas and `SERVER_INSTRUCTIONS` in `src/tools.ts` are the source of truth; `docs/tools.md` is the long form.
 
-- **`search`** — queries SearXNG, reranks results with a local ML model, returns top N structured results
-- **`search_and_fetch`** — same as `search` but also fetches full content of the top result(s) via the fetch cascade
-- **`search_and_summarize`** — search, fetch, then synthesize a summary with citations via Ollama (default `qwen3:14b`, override with `OLLAMA_SUMMARIZE_MODEL`). If the LLM is unavailable it degrades to raw fetched pages, and says so: the payload leads with a `--- summarization unavailable (<kind>: <detail>) ---` marker. Absence of that marker means you got a real synthesis.
-- **`fetch_url`** — fetch and extract readable markdown from any public URL; GitHub URLs use the GitHub API, YouTube/Reddit URLs have opt-in fast paths; optional `target_selector`/`wait_for_selector` and `max_tokens` budget
+- **`search`** — SearXNG search reranked by a local model. `query` is a string or up to 5 phrasings (parallel, merged, URLs deduped); `max_results`; `content`: `snippets` (default) | `highlights` (top 5 pages' 2 best passages each) | `full` (top 3 pages' text); `answer: true` adds a cited synthesis from the local LLM (`OLLAMA_SUMMARIZE_MODEL`, default `qwen3:14b`). If the LLM is unavailable the payload leads with a `--- summarization unavailable (<kind>: <detail>) ---` marker and carries the pages instead; absence of that marker means you got a real synthesis. Also `include_domains`/`exclude_domains` (hard filters), `time_range`, `category`, `domain_profile`, `language`, `min_score`, `fresh`, `expand`, `engines`.
+- **`fetch_url`** — readable markdown from up to 5 public URLs (HTML, PDF, GitHub API, opt-in YouTube/Reddit fast paths). Returns a window ending in a footer like `[chars 0–8,000 of 23,410 · continue with offset=8000]`; `max_tokens`, `offset`, `query` (reranked passages), `find` (literal passages), `fresh`, `domain_profile`, `target_selector`, `wait_for_selector`. Pages are always cached at the 40k-char store ceiling, so paging is a cache hit.
 - **`crawl_site`** — crawl a site and return a page manifest (sitemap → optional BFS, scoped to the start URL's path); content cached for follow-up `fetch_url`
-- **`clear_cache`** — purge the Valkey result cache (search, fetch, crawl, or all)
-- **`domain_stats`** — read-only view of the domain capability database (single-domain or aggregate) with MCP structured output
+- **`clear_cache`** / **`domain_stats`** — operator tools, registered only with `SEARXNG_MCP_ADMIN_TOOLS=true`: purge the Valkey cache; read-only view of the domain capability database with structured output
+
+`search_and_fetch` and `search_and_summarize` were removed in 4.0.0 (`search` `content: "full"` / `answer: true`).
 
 ## Structure
 
@@ -20,7 +19,9 @@ Exposes seven MCP tools:
 src/
   index.ts        # Entry point — creates MCP server, registers tools, selects transport
   http-transport.ts # HTTP transport: bearer gate, /health, per-session routing + eviction
-  tools.ts        # Tool definitions (schemas + handlers)
+  tools.ts        # Tool definitions (schemas + handlers) and SERVER_INSTRUCTIONS
+  paging.ts       # fetch_url windowing: offset windows + continuation footer, literal `find` passages
+  passages.ts     # Chunk stored markdown (~700 chars), drop link-dominated chunks, rerank against a query
   search.ts       # SearXNG client
   fetch.ts        # Fetch orchestrator: fast paths, robots gate, tier cascade, caching, post-extract
   fetch-utils.ts  # Shared primitives: USER_AGENT, assertPublicUrl, safeFetch, FetchTuning, readBoundedText, TierResult
@@ -28,6 +29,10 @@ src/
   youtube.ts      # YouTube transcript fast path (timedtext; opt-in via robots)
   reddit.ts       # Reddit .json fast path (post + top comments; opt-in via robots)
   pdf.ts          # PDF fast path: local text extraction via unpdf (bounded binary read, page cap)
+  extractors/
+    readability.ts  # JSDOM + Readability; preferReadability (wins at >=40% of the tier's prose)
+    markdown.ts     # Readability article element -> markdown (turndown + typed GFM table rule)
+    post-extract.ts # JSON-LD Article + title cascade
   tiers/          # Tier handlers (one file per tier)
     crawl4ai.ts   # Tier 2: Crawl4AI headless fetch + Readability comparison (no tier 1; slot names kept)
     raw.ts        # Tier 3: raw HTTP + Readability; fetchRawHtmlForMetadata for post-extract
@@ -35,8 +40,8 @@ src/
     wayback.ts    # Tier 4: Wayback Machine CDX lookup + rawFetch (opt-in, WAYBACK_ENABLED)
     github.ts     # GitHub fast path: README, blob, tree, releases (API); other github.com pages take the cascade
     index.ts      # Barrel re-export
-  reranker.ts     # Jina-compatible reranker client + recency weighting
-  ollama.ts       # Ollama client (query expansion + summarization)
+  reranker.ts     # Jina-compatible reranker client + recency weighting + passage scoring
+  ollama.ts       # Ollama/OpenAI-compatible client (query expansion + search answer synthesis)
   cache.ts        # Valkey/Redis caching layer (get/set + Lua EVAL compare-and-set + SCAN)
   domain-db.ts    # Per-domain capability records (tier stats, capabilities); best-effort writes
   domain-stats.ts # Bounded SCAN enumerate + aggregate helpers, summary/formatters (tool + job)
@@ -49,7 +54,7 @@ src/
     domain-db-maintenance.ts # Standalone job: OTel gauges + durable snapshot (cron/PM2, single writer)
     restore-domain-db.ts     # Re-seed the domain-db from the newest snapshot after a flush
 tests/
-  *.test.ts       # Vitest unit tests (564 tests across 51 files)
+  *.test.ts       # Vitest unit tests (1,342 tests across 95 files, 6 skipped without VALKEY_TEST_URL)
 ```
 
 The domain-db maintenance/restore CLIs are standalone (`pnpm domain-db-maintenance`, `pnpm restore-domain-db`) — run the maintenance job on a schedule, **not** as an in-process timer, since searxng-mcp runs as several concurrent per-agent stdio children. Snapshot path/retention via `DOMAIN_DB_SNAPSHOT_DIR` / `DOMAIN_DB_SNAPSHOT_RETENTION`.
@@ -69,7 +74,7 @@ Optional services (server degrades gracefully without these):
 | Reranker | `RERANKER_URL` | ML relevance reranking |
 | Crawl4AI | `CRAWL4AI_URL` | JS-rendering fetch, first tier of the cascade (tier 2); recommended |
 | Valkey/Redis/Dragonfly | `CACHE_URL` | Result caching (also accepts `VALKEY_URL` or `REDIS_URL`) |
-| Ollama | `OLLAMA_URL` | Query expansion + summarization |
+| Ollama | `OLLAMA_URL` | Query expansion + `search` `answer: true` |
 | Wayback Machine | `WAYBACK_ENABLED=true` | Archived snapshot fallback (tier 4, opt-in) |
 | Hister | `HISTER_URL`, `HISTER_TOKEN` | Browsing-history index (Firefox extension); fast path before tier cascade for login-walled and JS-heavy pages |
 
@@ -89,8 +94,8 @@ Transport: stdio by default; `SEARXNG_MCP_TRANSPORT=http` runs a shared HTTP ser
 The HTTP transport is unauthenticated unless `SEARXNG_MCP_AUTH_TOKEN` is set — the default
 `127.0.0.1` bind is what makes that safe. Any non-loopback bind (`0.0.0.0`, i.e. every
 containerised deployment) **must** set the token, or every tool is reachable by anything that
-can route to the port, including the arbitrary-URL `fetch_url` and the destructive
-`clear_cache`. The startup guard logs a warning for exactly that combination.
+can route to the port, including the arbitrary-URL `fetch_url` and, with `SEARXNG_MCP_ADMIN_TOOLS=true`, the
+destructive `clear_cache`. The startup guard logs a warning for exactly that combination.
 
 When set, all requests except `GET /health` require `Authorization: Bearer <token>`; failures
 get a `401` with `WWW-Authenticate: Bearer`. `/health` is exempt on purpose — it is the

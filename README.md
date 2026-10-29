@@ -2,7 +2,7 @@
 
 Private web search for AI agents, over MCP. Queries go to your own [SearXNG](https://github.com/searxng/searxng);
 results are reranked by a local model; pages are fetched and extracted locally (fast paths, Crawl4AI,
-then an in-process raw fetch). No third-party search or scraping API sees what your agents look up.
+then an in-process raw fetch) into markdown, PDFs included. No third-party search or scraping API sees what your agents look up.
 
 Forked from [TadMSTR/searxng-mcp](https://github.com/TadMSTR/searxng-mcp) (MIT) at v3.30.1 and maintained
 separately: Firecrawl is gone, and the tool surface is tuned for agent consumption — few tools, small
@@ -21,11 +21,12 @@ SEARXNG_URL=http://localhost:8081 \
   node build/src/index.js
 ```
 
-What works in this configuration: `search` returns ranked results, and `fetch_url` /
-`search_and_fetch` return extracted page content via tier 3 (raw HTTP fetch + Readability, wholly
-in-process). What does not: semantic reranking (results keep SearXNG's ordering), query expansion
-and `search_and_summarize` (no LLM), caching (every call is live), JS-heavy page rendering, and
-offline serving.
+What works in this configuration: `search` returns results, and `fetch_url` (and `search` with
+`content: "full"`) return page content as markdown via tier 3 (raw HTTP fetch + Readability,
+wholly in-process), with PDFs extracted in-process too. What does not: semantic reranking
+(results keep SearXNG's ordering, and `highlights` / `fetch_url` `query` passages fall back to
+term overlap), query expansion and `search` `answer: true` (no LLM), caching (every call is live),
+JS-heavy page rendering, and offline serving.
 
 The startup capability line reports three states per capability, not two:
 `on` (self-contained — nothing remote has to work for it to be true), `unverified` (configured,
@@ -72,13 +73,10 @@ Moving up a rung is `docker compose -f compose.<next>.yml up -d` — all four sh
 project name, so compose reconciles in place rather than starting a second copy of what you
 already had.
 
-**As a container** — published to GHCR on every release:
-
-```bash
-docker pull ghcr.io/tadmstr/searxng-mcp:latest
-```
-
-Tags, uid, and provenance verification: [Deployment](docs/deployment.md#container-image).
+**As a container** — this fork publishes no image; build the `Dockerfile`
+(`docker build -t private-search-4-agents .`). The `ghcr.io/tadmstr/*` images referenced by
+upstream docs and the compose examples are upstream's and carry the old tool surface — see
+[Deployment](docs/deployment.md#container-image-upstream).
 
 The reranker ships in this repo — `cd docker/reranker && docker compose up`, or pull `ghcr.io/tadmstr/searxng-mcp-reranker`. It is CPU-only, needs no API key, and has the model baked in so there is no cold start. See [`docker/reranker/README.md`](docker/reranker/README.md).
 
@@ -99,10 +97,11 @@ differentiators here are in what happens *after* the search:
 |---|---|---|
 | SearXNG search | yes | yes |
 | ML reranking of results | local cross-encoder, reorders by relevance — ships in [`docker/reranker/`](docker/reranker/) | SearXNG's own ordering |
-| Full-page content retrieval | fetch cascade — Crawl4AI, in-process raw fetch + Readability, opt-in solver and Wayback | none, or a single raw fetch |
+| Full-page content retrieval | fetch cascade — Crawl4AI, in-process raw fetch + Readability → markdown (headings, code fences, links, tables), opt-in solver and Wayback | none, or a single raw fetch |
+| Long pages | pageable windows with an `offset=` footer; `find` for literal matches; `query` for reranked passages | truncated, silently |
 | PDF text | in-process extraction (`unpdf`), keyless — `.pdf` URLs and extensionless PDFs alike | none |
 | Per-domain routing | domain capability database learns which tier works per domain and skips the ones that do not | none |
-| Summarisation | Ollama, with citations back to source URLs | none |
+| Cited answers | `search` `answer: true` — local LLM (Ollama or OpenAI-compatible), citations back to source URLs, explicit fallback marker | none |
 | Site crawling | `crawl_site` — sitemap-first, optional BFS, scoped to the start URL's path | none |
 | Caching | persistent, shared across clients (Valkey/Redis) | in-process or none |
 | Challenge handling | detection-gated solver tier, plus a Wayback fallback | none |
@@ -115,15 +114,17 @@ verified, and what's off — see [Quick Start](#quick-start) above.
 
 ## Tools
 
+Three tools, ~1.8k tokens of schema, plus MCP server `instructions` describing the flow.
+
 | Tool | What it does |
 |------|--------------|
-| `search` | Search via SearXNG with local ML reranking, plus SearXNG's own direct answers, infoboxes and suggestions. |
-| `search_and_fetch` | Search, rerank, then fetch full content of the top result(s) through the fetch cascade. |
-| `search_and_summarize` | Search, fetch, then synthesize a cited summary via Ollama. On failure, falls back to raw fetched content led by an explicit `summarization unavailable (<kind>: <detail>)` marker — no marker means a real synthesis. |
-| `fetch_url` | Fetch and extract readable markdown from any public URL, via fast paths or the fetch cascade. |
+| `search` | SearXNG search with local reranking; up to 5 phrasings per call. `content`: `snippets` (default), `highlights` (the most relevant passages of the top pages) or `full`. `answer: true` adds a cited local-LLM synthesis; if it cannot be produced the response leads with a `--- summarization unavailable (<kind>: <detail>) ---` marker and carries the pages instead. `include_domains` / `exclude_domains`, `time_range`, `min_score`, `fresh`. |
+| `fetch_url` | Read up to 5 public URLs as markdown — HTML, PDF, GitHub API, YouTube transcripts, Reddit threads. Returns a window with a footer saying how to continue (`offset=`), or `query` passages, or `find` matches. |
 | `crawl_site` | Crawl a site and return a URL/title/snippet manifest. Page content is cached, so follow-up `fetch_url` calls are free. |
-| `clear_cache` | Purge the search, fetch or crawl cache. |
-| `domain_stats` | Read-only view of the domain capability database — per-tier success rates, as structured output. |
+
+`clear_cache` and `domain_stats` are operator tools, registered only with
+`SEARXNG_MCP_ADMIN_TOOLS=true`. `search_and_fetch` and `search_and_summarize` were removed in
+4.0.0 (use `search` with `content: "full"` / `answer: true`).
 
 Full parameter reference: [`docs/tools.md`](docs/tools.md).
 
@@ -134,7 +135,7 @@ Two read-only MCP Resources, additive to the tools above.
 | URI | What it returns |
 |-----|-----------------|
 | `config://searxng-mcp` | Effective configuration and capability state — which backing services are wired, the three-state capability line, behaviour switches and tunables, and which credentials are configured. |
-| `stats://domains` | Aggregate view of the domain capability database, mirroring the aggregate mode of `domain_stats`. Reports `available: false` with a reason when the database cannot be read, which is **not** the same as it being empty. |
+| `stats://domains` | Aggregate view of the domain capability database, mirroring the aggregate mode of the admin `domain_stats` tool. Reports `available: false` with a reason when the database cannot be read, which is **not** the same as it being empty. |
 
 `config://searxng-mcp` never includes a credential value. Secrets are reported as a
 boolean — configured or not — and every URL is stripped of inline userinfo before it is

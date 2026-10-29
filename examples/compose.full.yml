@@ -14,7 +14,7 @@
 # or you are developing against the fetch cascade itself.
 #
 # WHAT CHANGES FROM RUNG 3
-#   `search_and_summarize`   now works — Ollama synthesises a cited summary.
+#   `search` answer:true     now works — Ollama synthesises a cited summary.
 #                            Below rung 4 it returns fetched pages behind an
 #                            explicit `summarization unavailable` marker.
 #   Wikipedia / Stack Overflow / Arch Wiki
@@ -33,7 +33,7 @@
 # collector here — set OTEL_EXPORTER_OTLP_ENDPOINT if you run one.
 #
 # PREREQUISITES — this rung does NOT work straight out of `up -d`:
-#   - Ollama models. Pull them after first start, or search_and_summarize fails:
+#   - Ollama models. Pull them after first start, or `search` answer:true falls back:
 #       docker compose -f examples/compose.full.yml exec ollama ollama pull qwen3:4b
 #       docker compose -f examples/compose.full.yml exec ollama ollama pull qwen3:14b
 #   - Kiwix ZIM files in ./kiwix-data/ — https://download.kiwix.org/

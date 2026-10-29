@@ -10,12 +10,14 @@
 # WHAT WORKS HERE
 #   `search`                  yes — ranked results, in SearXNG's own order
 #   `fetch_url`               yes — tier 3 (in-process raw fetch + Readability)
-#   `search_and_fetch`        yes — same tier-3 extraction
+#   `search` content:full     yes — same tier-3 extraction (highlights fall
+#                             back to term overlap: no reranker)
 #   `crawl_site`              yes — sitemap, then BFS if CRAWL_BFS_ENABLED
-#   `clear_cache`             no-op — there is no cache to purge
-#   `domain_stats`            yes, but the DB is in-memory and dies with the
-#                             container (no cache backend to persist it)
-#   `search_and_summarize`    NO — needs an LLM. Returns fetched pages led by an
+#   `clear_cache`             no-op — there is no cache to purge (admin tool,
+#                             only with SEARXNG_MCP_ADMIN_TOOLS=true)
+#   `domain_stats`            yes (admin tool), but the DB is in-memory and dies
+#                             with the container (no cache backend to persist it)
+#   `search` answer:true      NO — needs an LLM. Returns fetched pages led by an
 #                             explicit `summarization unavailable` marker.
 #
 # THE CAPABILITY LINE THIS RUNG PRINTS — measured 2026-09-07, not predicted:

@@ -7,8 +7,8 @@ past that point lives here.
 |----------|---------------|
 | [Examples](../examples/) | The four-rung Docker Compose ladder — `compose.minimal.yml` → `compose.crawl4ai.yml` → `compose.reranker.yml` → `compose.full.yml`, each a strict superset of the one above it. Start at the rung matching what you're willing to run. |
 | [Configuration](configuration.md) | Every environment variable, and the setup for each optional backing service (SearXNG, reranker, Crawl4AI, Kiwix, Hister, Valkey, Ollama). |
-| [Tools](tools.md) | Full per-tool parameter reference for all seven MCP tools, plus GitHub URL handling. |
-| [Deployment](deployment.md) | Install from npm or source, stdio and HTTP transports, HTTP authentication, and MCP client recipes for Claude Code, Claude Desktop and LibreChat. |
+| [Tools](tools.md) | Full per-tool parameter reference for `search`, `fetch_url`, `crawl_site` and the opt-in admin tools, plus GitHub URL handling. |
+| [Deployment](deployment.md) | Install from npm or source, stdio and HTTP transports, HTTP authentication, and MCP client recipes for Claude Code, Claude Desktop, LibreChat and the Pi coding agent. |
 | [Architecture](architecture.md) | The fetch cascade and tier semantics, adblocking, data-driven tier routing, the domain capability database, every fast path, resilience, and observability. |
 | [Reranker](../docker/reranker/README.md) | The bundled CPU-only reranking service: the `/v1/rerank` contract, the model, why it is baked into the image, and how to run or pull it. |
 | [Security](security.md) | SSRF handling, redirect protection, transport exposure, bounded reads, dependency auditing, credential handling and input validation. Vulnerability reporting is in [`SECURITY.md`](../SECURITY.md). |

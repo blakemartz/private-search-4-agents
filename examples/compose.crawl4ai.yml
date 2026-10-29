@@ -13,7 +13,7 @@
 #   caching                          now real — searches and fetched pages persist
 #                                    across restarts, and `clear_cache` does something
 #   `domain_stats`                   now durable — the capability DB survives a restart
-#   `search_and_summarize`           still NO — needs an LLM, which is rung 4
+#   `search` answer:true             still NO — needs an LLM, which is rung 4
 #
 # THE CAPABILITY LINE THIS RUNG PRINTS — measured 2026-09-07:
 #

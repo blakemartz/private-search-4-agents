@@ -2,7 +2,13 @@
 
 # Install and deployment
 
-## npm (recommended)
+> **This fork (`private-search-4-agents`) is not published to npm or GHCR** (`package.json` is
+> `"private": true`). The `@tadmstr/searxng-mcp` package and `ghcr.io/tadmstr/*` images below are
+> upstream's: they predate the fork and still carry the old seven-tool surface and Firecrawl. To
+> run this fork, build [from source](#from-source) (or build the `Dockerfile`) and point the client
+> recipes at `build/src/index.js` or the HTTP endpoint.
+
+## npm (upstream)
 
 ```bash
 npm install -g @tadmstr/searxng-mcp
@@ -14,9 +20,9 @@ Or run directly with `npx`:
 npx @tadmstr/searxng-mcp
 ```
 
-## Container image
+## Container image (upstream)
 
-Published to GHCR on every release tag:
+Upstream publishes to GHCR on every release tag (see the note at the top):
 
 ```bash
 docker pull ghcr.io/tadmstr/searxng-mcp:latest
@@ -91,13 +97,15 @@ Verified 2026-09-06 against both published images at v3.25.0 and v3.25.1.
 ## From source
 
 ```bash
-git clone https://github.com/TadMSTR/searxng-mcp.git
-cd searxng-mcp
+git clone https://github.com/blakemartz/private-search-4-agents.git
+cd private-search-4-agents
 pnpm install
 pnpm build
 ```
 
 Output: `build/src/index.js`
+
+Requires Node.js 22+ (`engines`; the PDF extractor `unpdf` needs it).
 
 # MCP Client Configuration
 
@@ -161,6 +169,35 @@ mcpServers:
       CRAWL4AI_URL: http://localhost:11235
 ```
 
+## Pi coding agent
+
+Pi ≥ 1.4 has a native MCP client. Run this server with the HTTP transport (see [Transport](#transport))
+and add it to `~/.pi/agent/mcp.json`:
+
+```json
+{ "mcpServers": { "web": {
+  "url": "http://127.0.0.1:3001/mcp",
+  "headers": { "Authorization": "!echo Bearer $(sed -n 's/^SEARXNG_MCP_AUTH_TOKEN=//p' ~/dev/websearch/.env.searxng-mcp)" },
+  "exposure": "direct", "timeout": 180,
+  "description": "Private web search (self-hosted SearXNG, local rerank, local page fetch): search, fetch_url, crawl_site" } } }
+```
+
+- The tools appear as `mcp__web__search`, `mcp__web__fetch_url` and `mcp__web__crawl_site`.
+- A header value starting with `!` is run as a shell command and its output used, so the bearer
+  token is read from the env file at connect time and never written into `mcp.json`. Point the
+  `sed` at wherever your `SEARXNG_MCP_AUTH_TOKEN` lives; drop the header if the server runs
+  without a token.
+- `timeout: 180` leaves room for `search` with `answer: true` on a cold local model.
+- Verify with `pi mcp list`.
+
+## Wrappers that spawn per call (mcporter and similar)
+
+Prefer the HTTP transport over letting a wrapper spawn a stdio child per call. Every stdio spawn
+pays Node startup, module load and a fresh cache connection before the first byte of work;
+measured on the same host, a cached `search` took **0.11 s** over a long-running HTTP server
+against **2.3 s** through per-call stdio spawning. Run one HTTP server and point the wrapper at
+`http://127.0.0.1:3001/mcp`.
+
 ## MCP Resources through a proxy
 
 Resources (`config://searxng-mcp`, `stats://domains`) are a separate JSON-RPC surface from
@@ -174,7 +211,7 @@ Verified against one such proxy, scoped_mcp 1.14.0: its `mcp_proxy` calls only `
 and `call_tool()` on the upstream client and re-registers the results on its own server — there
 is no generic forwarding path, and `grep -rln "list_resources\|read_resource"` over its tree
 returns zero files. Resources reach direct MCP clients (Claude Code, Claude Desktop, LibreChat)
-without issue; they do not reach a client sitting behind that proxy. The seven tools are
+without issue; they do not reach a client sitting behind that proxy. The tools are
 unaffected either way.
 
 If you're deploying behind a different proxy, check whether it implements `resources/list` and

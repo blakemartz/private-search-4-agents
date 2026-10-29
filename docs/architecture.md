@@ -22,7 +22,8 @@ MCP client (stdio)
       │                     └→ Wayback Machine (opt-in)  → archived page markdown (tier 4, $WAYBACK_ENABLED)
       ├── crawl_site ───────┬→ Sitemap parsing           → page manifest (phase 1, fast-xml-parser)
       │                     └→ BFS crawl (opt-in)        → page manifest (phase 2, $CRAWL_BFS_ENABLED)
-      └── summarize (opt.) →  Ollama ($OLLAMA_URL)        → synthesized summary ($OLLAMA_SUMMARIZE_MODEL)
+      ├── passages ─────────→ Reranker ($RERANKER_URL)    → query-relevant chunks (highlights, fetch_url query)
+      └── answer (opt.) ────→  Ollama ($OLLAMA_URL)        → cited synthesis, search answer:true ($OLLAMA_SUMMARIZE_MODEL)
 ```
 
 ```mermaid
@@ -99,6 +100,8 @@ flowchart TD
 
 **There is no tier 1.** It was Firecrawl, removed in this fork; the cascade starts at Crawl4AI. The slot names `tier2`/`tier3` were deliberately not renumbered, because they are persisted in domain-db records and in `tier_skip` config.
 
+**Every fetched page is cached at the store ceiling.** `fetchPage` always extracts and stores up to `FETCH_STORE_CEILING` (40,000 chars), whatever the caller asked for, and the tools window that stored text on read. So `fetch_url` paging (`offset`), `find`, `query` passages and `search` highlights over the same page are cache hits rather than refetches, and paging past the first 8,000 chars works however the page was first fetched. A stored text that reaches the ceiling was itself cut; `fetch_url`'s footer then reports the length as `≥40,000 (store limit)`.
+
 **PDFs are extracted locally, ahead of the cascade.** No cascade tier reads PDFs (Crawl4AI renders them in a browser and finds no text; tier 3 reads bodies as text), so a PDF fast path does — see [PDF fast path](#pdf-fast-path). A PDF reaching tier 3 means that path was skipped or failed, and tier 3 says so: `PDF content cannot be extracted by raw fetch — the local PDF path was skipped or failed`.
 
 ## Adblocking
@@ -145,7 +148,7 @@ PDF text is extracted in-process with [`unpdf`](https://github.com/unjs/unpdf) (
 A URL takes this path when its path ends in `.pdf` (no probe needed), or when the [content-type probe](#content-type-fast-path)'s `HEAD` reports `application/pdf` — which is how extensionless PDFs (`arxiv.org/pdf/<id>`, `?download=` handlers) are found. It runs after the robots gate and `assertResolvedPublic`, fetches through `safeFetch`, and follows redirects by hand (at most 5) so every hop is re-checked by the string-level SSRF guard as well as the connect-time one.
 
 - The body is read as bytes, capped at `PDF_MAX_BYTES` (20 MB) — a declared `Content-Length` over the cap is refused before reading, and a stream that crosses it is cancelled. The `%PDF-` signature must appear in the first 1 KB, or the body is treated as not a PDF.
-- Output: the PDF's `Title` metadata (or the filename) as the title; text is each page under a `--- page N ---` marker, whitespace collapsed. Pages are walked up to `PDF_MAX_PAGES` (50) and stop once the text reaches the fetch store size (8,000–40,000 chars), so CPU is bounded by what would be kept anyway; a page-cap stop is noted at the end.
+- Output: the PDF's `Title` metadata (or the filename) as the title; text is each page under a `--- page N ---` marker, whitespace collapsed. Pages are walked up to `PDF_MAX_PAGES` (50) and stop once the text reaches the fetch store ceiling (40,000 chars), so CPU is bounded by what would be kept anyway; a page-cap stop is noted at the end.
 - Recorded through `runTier` as `pdf_local` (domain-db slot `pdf`), cached like every other fast path.
 - **Fail-open**, with one exception. A non-PDF body at a `.pdf` URL, an oversize file, an HTTP error or a parse failure falls through to the cascade, and the `pdf_local` reason is named in the final error if that fails too. A PDF that parses but has **no text layer** (scanned/image-only) or needs a password is a fact about the document, so it is returned as an error — `PDF has no extractable text layer (scanned?)` — rather than retried. There is no OCR.
 - `PDF_EXTRACT_ENABLED=false` turns the path off; PDFs then take the cascade and fail at tier 3, as before.
@@ -172,7 +175,7 @@ Every fetch records what searxng-mcp learns about the target domain to Valkey un
 - `capabilities.og_title.{sampled, present, last_sampled_at}` — same for `<meta property="og:title">`
 - `preferred_strategy` — currently set to `llms_full_txt` when a present probe lands; future phases will use this to skip the tier cascade
 
-Inspect a record with the bundled CLI, or query it from an agent via the `domain_stats` tool (single-domain or aggregate; see [Tools](tools.md)):
+Inspect a record with the bundled CLI, or query it via the `domain_stats` admin tool (registered with `SEARXNG_MCP_ADMIN_TOOLS=true`; single-domain or aggregate; see [Tools](tools.md#admin-tools)) or the `stats://domains` resource:
 
 ```bash
 pnpm dump-domain docs.anthropic.com
@@ -247,7 +250,18 @@ A start URL with a path (`https://example.com/docs`) confines both phases to pag
 
 Full page content fetched during the crawl is cached in Valkey (TTL: `CRAWL_MANIFEST_TTL_SECONDS`, default 6 hours). Subsequent `fetch_url` calls for any URL in the manifest return immediately from cache — zero fetch overhead for follow-up reads.
 
-The manifest cache can be cleared with `clear_cache(target="crawl")`.
+The manifest cache can be cleared with the admin tool `clear_cache(target="crawl")`.
+
+## Passages
+
+`search` with `content: "highlights"` and `fetch_url` with `query` return the passages of a page most relevant to a question rather than its head (`src/passages.ts`):
+
+1. **Chunk.** The stored markdown is split on blank lines and paragraphs are packed into ~700-char chunks; a longer paragraph is split on its own, at a sentence or line break where one is near. Each chunk keeps its character offset, so a passage can be followed up with `fetch_url` `offset`.
+2. **Clean and filter.** Each chunk is reduced to prose (link targets, image syntax, heading/emphasis markers, permalink glyphs removed). Chunks under 80 chars of prose, or where prose is under 40% of the raw chunk — nav menus, tables of contents — are dropped.
+3. **Score.** The remaining chunks (prefiltered by term overlap to at most 64 on long pages) are scored against the query by the same local cross-encoder that reranks search results (`RERANKER_URL`, `/v1/rerank`).
+4. **Fallback.** With no reranker, or when it errors, chunks are scored by term overlap (the fraction of the query's distinct terms present). That is a much weaker signal, and the output says so: `fetch_url` prints `ranked by term overlap — reranker unavailable` instead of `ranked by the local reranker`.
+
+`find` is separate and purely literal (`src/paging.ts`): case-insensitive matches, `|` for alternatives, ±300 chars of context, overlapping windows merged, at most 8 passages.
 
 ## Wayback Machine fallback
 
@@ -283,13 +297,14 @@ degrades cleanly into the Wayback tier — not an error, and not something to al
 
 After any tier returns content with raw HTML, a post-extraction pass improves title and body quality:
 
-- **JSON-LD Article extraction** — Schema.org `Article` / `NewsArticle` / `BlogPosting` / `TechArticle` blocks supply cleaner `headline` and `articleBody` than tier-1 chrome scraping (size-capped at 1 MB per script tag).
+- **JSON-LD Article extraction** — Schema.org `Article` / `NewsArticle` / `BlogPosting` / `TechArticle` blocks supply cleaner `headline` and `articleBody` than scraping the rendered page (size-capped at 1 MB per script tag).
 - **Title cascade** — falls back through `og:title` → `twitter:title` → `<title>` (with publisher-suffix stripping) → first `<h1>` → URL.
-- **Tier-2 Readability comparison** — when Crawl4AI returns markdown, JSDOM+Readability also runs over its raw HTML and is preferred when its text is longer (or unconditionally when Crawl4AI returns less than 500 chars).
+- **Markdown, not plain text** — when Readability wins (tiers 2 and 3, and the Kiwix path), its cleaned article element is converted to markdown (`src/extractors/markdown.ts`, via `turndown`): ATX headings, paragraphs, lists, fenced code with the language from `language-x`/`lang-x`/`data-lang`, absolute links (same-page anchors dropped, only the first link to a URL kept), blockquotes, GFM tables, images as alt text.
+- **Tier-2 Readability comparison** — when Crawl4AI returns markdown, JSDOM+Readability also runs over its raw HTML. Both candidates are compared on prose length (link targets and markdown syntax stripped). Readability wins when it keeps at least **40%** of the tier's prose — it exists to drop navigation and footers, so on a good page it is shorter by design (real articles measured 0.56–0.94, genuine Readability failures 0.03–0.11) — or unconditionally when the tier's own prose is under 500 chars.
 
 ## Relevance filtering (`min_score`)
 
-The three search tools accept `min_score` (0–1), a floor applied after reranking. Omit it and nothing changes.
+`search` accepts `min_score` (0–1), a floor applied after reranking. Omit it and nothing changes.
 
 It filters on the **raw cross-encoder `relevance_score`**, not on the value used for ordering. Ranking sorts by `relevance_score + RERANK_RECENCY_WEIGHT * recencyScore(publishedDate)`, which with the default weight of `0.15` ranges over **0–1.15, not 0–1**. Filtering a parameter called "minimum relevance" on that number would quietly make it mean "relevant enough *or* recent enough". Filtering happens before the top-N slice, so the floor never costs you a result that cleared it.
 
@@ -327,7 +342,7 @@ Tracing, metrics, and event publishing are entirely opt-in — with none of the 
 
 **OpenTelemetry (traces + metrics)** — set `OTEL_EXPORTER_OTLP_ENDPOINT` to your collector's HTTP endpoint and the server emits:
 
-- Spans (per request): `tool.<name>` → `expand_query`? → `searxng_request` → `rerank` → `fetch` (×N) → `tier2_crawl4ai` | `tier3_rawfetch` | `solver_byparr` → `post_extract`; plus `summarize_llm` for `search_and_summarize`.
+- Spans (per request): `tool.<name>` → `expand_query`? → `searxng_request` → `rerank` → `fetch` (×N) → `tier2_crawl4ai` | `tier3_rawfetch` | `solver_byparr` → `post_extract`; plus `rerank_passages` for highlights / `fetch_url` `query`, and `summarize_llm` for `search` `answer: true`.
 - Counters: `searxng_search_total{profile, expand}`, `searxng_fetch_total{tier, outcome}`, `searxng_cache_total{namespace, outcome}`, `searxng_errors_total{stage, error_type}`.
 - Histograms: `searxng_search_duration_seconds{profile}`, `searxng_fetch_duration_seconds{tier, outcome}`.
 
@@ -350,7 +365,7 @@ Each envelope includes `request_id` and (when OTel is enabled) `trace_id` so sub
 
 ## Politeness
 
-- **Honest User-Agent** — outbound requests identify as `searxng-mcp/<version> (+https://github.com/TadMSTR/searxng-mcp; personal research)`.
+- **Honest User-Agent** — outbound requests identify as `private-search-4-agents/<version> (+https://github.com/blakemartz/private-search-4-agents; personal research)`.
 - **robots.txt compliance** — `/robots.txt` is fetched once per origin and cached for 24 hours in Valkey under `robots:<origin>`. Disallowed paths are skipped before any tier runs and logged as `skipped_robots url=… reason=…`.
 
 ---
