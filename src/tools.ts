@@ -221,11 +221,16 @@ function formatHit(h: RankedHit, n: number): string {
     ? `\n   ${r.content.replace(/\s+/g, " ").trim().slice(0, SNIPPET_CHARS)}`
     : "";
   if (h.highlights && h.highlights.length > 0) {
+    // Line breaks are kept: collapsing them ran code blocks into one line.
     body = h.highlights
-      .map(
-        (p) =>
-          `\n   > ${p.text.replace(/\s+/g, " ").slice(0, HIGHLIGHT_CHARS)} [offset ${p.offset}]`,
-      )
+      .map((p) => {
+        const lines = p.text
+          .slice(0, HIGHLIGHT_CHARS)
+          .split("\n")
+          .map((l) => l.replace(/(\S)[ \t]+/g, "$1 ").trimEnd())
+          .filter((l, i, all) => l !== "" || all[i - 1] !== "");
+        return `\n   > ${lines.join("\n   > ")}\n   [offset ${p.offset}]`;
+      })
       .join("");
   }
   return `${n}. ${r.title}${meta}\n   ${r.url}${body}`;
@@ -476,6 +481,7 @@ export async function handleSearch(args: SearchArgs) {
             max_results,
             time_range,
             min_score,
+            domain_profile,
           );
           return { ranked, meta };
         }),

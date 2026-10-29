@@ -403,6 +403,17 @@ export const RERANK_RECENCY_WEIGHT = (() => {
   return v;
 })();
 
+/**
+ * Weight of the authority prior added to the rerank score (see authority.ts).
+ * The cross-encoder saturates — several on-topic results all score 0.98–1.00
+ * — so without a tie-breaker the official documentation loses to blog posts
+ * on noise and recency. 0 disables it.
+ */
+export const RERANK_AUTHORITY_WEIGHT = (() => {
+  const v = parseFloat(process.env.RERANK_AUTHORITY_WEIGHT ?? "0.1");
+  return Number.isNaN(v) || v < 0 ? 0 : v;
+})();
+
 // Operator-only MCP tools (clear_cache, domain_stats). Off unless set to
 // exactly "true": they are not part of an agent's search workflow, and
 // clear_cache wipes cache shared by every agent on the box.

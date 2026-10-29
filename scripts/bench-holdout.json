@@ -1,0 +1,12 @@
+[
+  { "q": "kubernetes pod disruption budget minAvailable", "gold": "kubernetes.io", "phrases": ["minAvailable"] },
+  { "q": "typescript satisfies operator vs type annotation", "gold": "typescriptlang.org", "phrases": ["satisfies"] },
+  { "q": "sqlite WAL mode concurrent readers writers", "gold": "sqlite.org", "phrases": ["WAL"] },
+  { "q": "redis SCAN vs KEYS production", "gold": "redis.io", "phrases": ["SCAN"] },
+  { "q": "terraform for_each vs count", "gold": "developer.hashicorp.com", "phrases": ["for_each"] },
+  { "q": "react useEffect cleanup function", "gold": "react.dev", "phrases": ["cleanup"] },
+  { "q": "openssh ProxyJump config bastion", "gold": "man.openbsd.org|openssh.com", "phrases": ["ProxyJump"] },
+  { "q": "tokio spawn_blocking when to use", "gold": "docs.rs", "phrases": ["spawn_blocking"] },
+  { "q": "nodejs fs promises readFile encoding", "gold": "nodejs.org", "phrases": ["readFile"] },
+  { "q": "linux kernel 6.17 release what's new", "gold": "kernelnewbies.org|kernel.org|lwn.net", "phrases": ["6.17"] }
+]

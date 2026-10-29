@@ -1,4 +1,10 @@
-import { RERANK_RECENCY_WEIGHT, RERANKER_URL } from "./config.js";
+import { authority } from "./authority.js";
+import {
+  RERANK_AUTHORITY_WEIGHT,
+  RERANK_RECENCY_WEIGHT,
+  RERANKER_URL,
+} from "./config.js";
+import { getBoostList } from "./domains.js";
 import { logThrottled } from "./log.js";
 import { withSpan } from "./observability.js";
 import type { RerankResponse, SearxResult } from "./types.js";
@@ -19,8 +25,10 @@ async function rerank(
   topN: number,
   applyRecency: boolean,
   minScore?: number,
+  profile?: string,
 ): Promise<SearxResult[]> {
   if (results.length === 0) return results;
+  const boostList = getBoostList(profile);
 
   const documents = results.map((r) => `${r.title}. ${r.content ?? ""}`.trim());
 
@@ -44,11 +52,15 @@ async function rerank(
     .filter((r) => r.index >= 0 && r.index < results.length)
     .map((r) => {
       const result = results[r.index];
+      // Boosts are applied HERE, not only by applyDomainFilters' pre-sort:
+      // that sort ran before the reranker re-sorted everything, so with a
+      // reranker up a boosted domain got no lift at all.
       const combined =
-        applyRecency && RERANK_RECENCY_WEIGHT > 0
-          ? r.relevance_score +
-            RERANK_RECENCY_WEIGHT * recencyScore(result.publishedDate)
-          : r.relevance_score;
+        r.relevance_score +
+        (applyRecency
+          ? RERANK_RECENCY_WEIGHT * recencyScore(result.publishedDate)
+          : 0) +
+        RERANK_AUTHORITY_WEIGHT * authority(query, result.url, boostList).total;
       // `relevance` is carried alongside `score` rather than being discarded
       // here, because the two are NOT interchangeable and `min_score` must
       // filter on the raw one. See the filter below.
@@ -82,6 +94,7 @@ export async function rerankWithFallback(
   topN: number,
   timeRange?: string,
   minScore?: number,
+  profile?: string,
 ): Promise<SearxResult[]> {
   return withSpan(
     "rerank",
@@ -108,7 +121,14 @@ export async function rerankWithFallback(
 
       const applyRecency = !timeRange; // skip when caller already filtered by date
       try {
-        return await rerank(query, results, topN, applyRecency, minScore);
+        return await rerank(
+          query,
+          results,
+          topN,
+          applyRecency,
+          minScore,
+          profile,
+        );
       } catch (err) {
         // Reranker unavailable — fall back to SearXNG order. Silent otherwise;
         // one throttled line makes "why did ranking quality drop" answerable.

@@ -65,6 +65,7 @@ import {
   PDF_EXTRACT_ENABLED,
   PDF_MAX_BYTES,
   PDF_MAX_PAGES,
+  RERANK_AUTHORITY_WEIGHT,
   RERANK_RECENCY_WEIGHT,
   RERANKER_URL,
   SEARXNG_URLS,
@@ -167,6 +168,7 @@ export function buildConfigResource() {
       cache_ttl_seconds: CACHE_TTL_SECONDS,
       fetch_cache_ttl_seconds: FETCH_CACHE_TTL_SECONDS,
       rerank_recency_weight: RERANK_RECENCY_WEIGHT,
+      rerank_authority_weight: RERANK_AUTHORITY_WEIGHT,
     },
 
     // Whether a credential is configured — NEVER its value.

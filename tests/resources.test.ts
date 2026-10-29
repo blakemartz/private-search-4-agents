@@ -425,6 +425,8 @@ const NOT_A_CREDENTIAL: Record<string, string> = {
   VALKEY_URL:
     "a CACHE_URL fallback — any inline password resolves into CACHE_URL, redacted at endpoints.cache",
   REDIS_URL: "a CACHE_URL fallback — same as VALKEY_URL",
+  RERANK_AUTHORITY_WEIGHT:
+    "a ranking weight; matches the sweep only because AUTHORITY contains AUTH",
 };
 
 describe("credentials_configured completeness", () => {

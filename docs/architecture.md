@@ -302,6 +302,20 @@ After any tier returns content with raw HTML, a post-extraction pass improves ti
 - **Markdown, not plain text** — when Readability wins (tiers 2 and 3, and the Kiwix path), its cleaned article element is converted to markdown (`src/extractors/markdown.ts`, via `turndown`): ATX headings, paragraphs, lists, fenced code with the language from `language-x`/`lang-x`/`data-lang`, absolute links (same-page anchors dropped, only the first link to a URL kept), blockquotes, GFM tables, images as alt text.
 - **Tier-2 Readability comparison** — when Crawl4AI returns markdown, JSDOM+Readability also runs over its raw HTML. Both candidates are compared on prose length (link targets and markdown syntax stripped). Readability wins when it keeps at least **40%** of the tier's prose — it exists to drop navigation and footers, so on a good page it is shorter by design (real articles measured 0.56–0.94, genuine Readability failures 0.03–0.11) — or unconditionally when the tier's own prose is under 500 chars.
 
+## Authority prior
+
+The cross-encoder's scores saturate: for a typical developer question five or six on-topic results all score 0.98–1.00, so their order is noise plus recency, and the official documentation (often 0.93–0.98) lands below blog posts. Ranking therefore adds a small, bounded prior (`src/authority.ts`):
+
+| Signal | Bonus (before weight) |
+|---|---|
+| A hostname label names a query term — `python` → `docs.python.org`, `postgres` → `postgresql.org`, `git` → `git-scm.com`; generic labels (`docs`, `dev`, `blog`, `github`, …) never count | 1 |
+| Docs-shaped URL — `docs.`/`developer.`/`man.` host, or a `/docs/`, `/reference/`, `/api/`, `/manual/`, `/std/` path | 0.5 |
+| The domain is in the global or profile `boost` list | 1 |
+
+The sum is multiplied by `RERANK_AUTHORITY_WEIGHT` (default `0.1`), so the largest possible lift is 0.25 — enough to reorder near-ties, never enough to lift an off-topic page (≈0.01) over an on-topic one. Domain boosts are applied here because the older pre-rerank boost sort was undone by the reranker's own sort whenever the reranker was up.
+
+Measured with `scripts/bench.mjs` (10 tuning questions, 10 held-out): authoritative page at rank 1 went 30% → 60% (tuning) and 0% → 40% (held-out); in the top 5, 60% → 90% and 50% → 80%. `min_score` is unaffected — it still filters on the raw relevance.
+
 ## Relevance filtering (`min_score`)
 
 `search` accepts `min_score` (0–1), a floor applied after reranking. Omit it and nothing changes.
