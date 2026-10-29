@@ -17,5 +17,4 @@ package-lock.json
 # these negations the root rule silently swallows them and the Dockerfiles'
 # `npm ci` references a file that is not in the repo.
 !docker/adblock-proxy/package-lock.json
-!docker/playwright-adblock/package-lock.json
 domain-db-snapshots/

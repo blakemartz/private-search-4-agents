@@ -10,7 +10,7 @@ import {
 } from "./ssrf-guard.js";
 import { VERSION } from "./version.js";
 
-export const USER_AGENT = `searxng-mcp/${VERSION} (+https://github.com/TadMSTR/searxng-mcp; personal research)`;
+export const USER_AGENT = `private-search-4-agents/${VERSION} (+https://github.com/blakemartz/private-search-4-agents; personal research)`;
 
 // Hard cap on HTML bytes read into memory per fetch. Anything larger than
 // this is dropped — the metadata extractors aren't useful on multi-megabyte

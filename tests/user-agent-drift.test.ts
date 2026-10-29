@@ -32,7 +32,7 @@ function tsFiles(dir: string): string[] {
 
 describe("outbound User-Agent", () => {
   it("is built from the package version", () => {
-    expect(USER_AGENT).toContain(`searxng-mcp/${VERSION}`);
+    expect(USER_AGENT).toContain(`private-search-4-agents/${VERSION}`);
   });
 
   it("reports the version package.json actually declares", () => {
@@ -61,7 +61,11 @@ describe("outbound User-Agent", () => {
         // hardcoded values while explaining why they must not come back.
         const code = line.trim();
         if (code.startsWith("//") || code.startsWith("*")) continue;
-        if (/["'`]searxng-mcp\/\d+\.\d+\.\d+/.test(line)) {
+        if (
+          /["'`](?:searxng-mcp|private-search-4-agents)\/\d+\.\d+\.\d+/.test(
+            line,
+          )
+        ) {
           offenders.push(`${file.slice(SRC.length + 1)}:${i + 1}`);
         }
       }

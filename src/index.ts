@@ -54,7 +54,7 @@ logCapabilities();
 
 const createSearxngServer = () => {
   const server = new McpServer({
-    name: "searxng-mcp",
+    name: "private-search-4-agents",
     version: VERSION,
   });
   registerTools(server);

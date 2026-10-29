@@ -1,15 +1,12 @@
-# searxng-mcp
+# private-search-4-agents
 
-[![Built with Claude Code](https://img.shields.io/badge/Built_with-Claude_Code-6B57FF?logo=claude&logoColor=white)](https://claude.ai/code)
-[![CI](https://github.com/TadMSTR/searxng-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/TadMSTR/searxng-mcp/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@tadmstr/searxng-mcp)](https://www.npmjs.com/package/@tadmstr/searxng-mcp)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Private web search for AI agents, over MCP. Queries go to your own [SearXNG](https://github.com/searxng/searxng);
+results are reranked by a local model; pages are fetched and extracted locally (fast paths, Crawl4AI,
+then an in-process raw fetch). No third-party search or scraping API sees what your agents look up.
 
-An MCP server for private web search via a self-hosted [SearXNG](https://github.com/searxng/searxng) instance. SearXNG is the only requirement; everything else is optional and layers on top — a local ML model reranks results, a fetch cascade (Crawl4AI, then an in-process raw fetch) retrieves full-page content, and an Ollama instance provides query expansion and LLM-synthesized summaries.
-
-Designed for use with Claude Code and LibreChat agents that need web search without sending queries to a third-party search API.
-
-Built with [Claude Code](https://claude.ai/code) using the multi-agent workflow from [homelab-agent](https://github.com/TadMSTR/homelab-agent) — the same platform that uses searxng-mcp in production for AI-assisted research.
+Forked from [TadMSTR/searxng-mcp](https://github.com/TadMSTR/searxng-mcp) (MIT) at v3.30.1 and maintained
+separately: Firecrawl is gone, and the tool surface is tuned for agent consumption — few tools, small
+schemas, bounded and pageable output.
 
 ## Quick Start
 
@@ -21,7 +18,7 @@ Everything else is optional and improves a specific dimension — see [Prerequis
 ```bash
 SEARXNG_URL=http://localhost:8081 \
   CACHE_URL= RERANKER_URL= \
-  npx @tadmstr/searxng-mcp
+  node build/src/index.js
 ```
 
 What works in this configuration: `search` returns ranked results, and `fetch_url` /

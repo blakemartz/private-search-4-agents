@@ -19,7 +19,7 @@ function resolveVersion(): string {
         readFileSync(join(dir, "package.json"), "utf8"),
       ) as { name?: string; version?: string };
       if (
-        pkg.name === "@tadmstr/searxng-mcp" &&
+        pkg.name === "private-search-4-agents" &&
         typeof pkg.version === "string"
       ) {
         return pkg.version;

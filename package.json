@@ -1,14 +1,15 @@
 {
-  "name": "@tadmstr/searxng-mcp",
-  "version": "3.30.1",
-  "description": "MCP server for SearXNG \u2014 private web search for Claude Code",
+  "name": "private-search-4-agents",
+  "version": "4.0.0",
+  "description": "Private web search for AI agents over MCP: self-hosted SearXNG, local reranking, local fetch and extraction",
   "main": "build/src/index.js",
   "bin": {
+    "private-search-4-agents": "build/src/index.js",
     "searxng-mcp": "build/src/index.js"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/TadMSTR/searxng-mcp.git"
+    "url": "https://github.com/blakemartz/private-search-4-agents.git"
   },
   "type": "module",
   "scripts": {
@@ -25,9 +26,11 @@
   "keywords": [
     "searxng",
     "mcp",
-    "search"
+    "search",
+    "agents",
+    "private-search"
   ],
-  "author": "TadMSTR",
+  "author": "blakemartz (fork of TadMSTR/searxng-mcp)",
   "license": "MIT",
   "packageManager": "pnpm@10.30.3",
   "engines": {
@@ -79,5 +82,6 @@
       "qs": ">=6.16.0 <7",
       "vite": ">=8.0.16 <9"
     }
-  }
+  },
+  "private": true
 }
