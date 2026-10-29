@@ -13,6 +13,12 @@ past that point lives here.
 | [Reranker](../docker/reranker/README.md) | The bundled CPU-only reranking service: the `/v1/rerank` contract, the model, why it is baked into the image, and how to run or pull it. |
 | [Security](security.md) | SSRF handling, redirect protection, transport exposure, bounded reads, dependency auditing, credential handling and input validation. Vulnerability reporting is in [`SECURITY.md`](../SECURITY.md). |
 
+## Local to this fork
+
+| Document | What is in it |
+|----------|---------------|
+| [pi-web-access](pi-web-access.md) | The Pi extension removed on 2026-10-25: how its SearXNG search provider worked, the functional and procedural delta against `search` here, and the capability gaps the removal left (PDF extraction, `source_check`, content paging). |
+
 ## Where to start
 
 - **Running it for the first time:** the README's Quick Start, then [Configuration](configuration.md).
