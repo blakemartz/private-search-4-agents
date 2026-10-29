@@ -19,8 +19,15 @@ export interface ScoredChunk extends Chunk {
 
 /** Target chunk size in chars. Big enough to carry a claim, small enough to rank. */
 const CHUNK_CHARS = 700;
-/** Most chunks sent to the cross-encoder per page; longer pages are prefiltered. */
-const MAX_SCORED_CHUNKS = 64;
+/**
+ * Default cap on chunks sent to the cross-encoder per page; longer pages are
+ * prefiltered by term overlap. The cross-encoder is CPU-bound and linear in
+ * batch size — measured on the local FlashRank service, 15 chunks take 0.7s
+ * and 64 take 3.5s — and concurrent calls queue behind each other, so this
+ * cap is the latency knob. Callers that need only a couple of passages pass a
+ * smaller one.
+ */
+export const MAX_SCORED_CHUNKS = 32;
 
 /**
  * Split on blank lines, then pack paragraphs into ~CHUNK_CHARS chunks. A
@@ -124,6 +131,7 @@ export async function selectPassages(
   query: string,
   text: string,
   k: number,
+  maxScored = MAX_SCORED_CHUNKS,
 ): Promise<PassageSelection> {
   const all = chunkText(text)
     .map((c) => ({
@@ -143,12 +151,12 @@ export async function selectPassages(
   // Prefilter long pages by term overlap so the cross-encoder sees a bounded
   // batch. Stable sort keeps document order among ties.
   const pool =
-    all.length <= MAX_SCORED_CHUNKS
+    all.length <= maxScored
       ? all
       : all
           .map((c, i) => ({ c, i, s: overlapScore(query, c.text) }))
           .sort((a, b) => b.s - a.s || a.i - b.i)
-          .slice(0, MAX_SCORED_CHUNKS)
+          .slice(0, maxScored)
           .map((x) => x.c);
 
   const scores = await scorePassages(

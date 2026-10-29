@@ -174,6 +174,12 @@ const SNIPPET_CHARS = 250;
 const HIGHLIGHT_PAGES = 5;
 const HIGHLIGHTS_PER_RESULT = 2;
 const HIGHLIGHT_CHARS = 600;
+/**
+ * Chunks per page the cross-encoder scores for highlights. Two passages are
+ * wanted from each of up to five pages, scored concurrently on one CPU-bound
+ * reranker, so the candidate set is kept small (see MAX_SCORED_CHUNKS).
+ */
+const HIGHLIGHT_SCORED_CHUNKS = 12;
 /** Results whose pages `content: "full"` returns, sharing one budget. */
 const FULL_PAGES = 3;
 const FULL_TOTAL_CHARS = 8000;
@@ -516,6 +522,7 @@ export async function handleSearch(args: SearchArgs) {
               queries[h.queryIndex],
               s.value.text,
               HIGHLIGHTS_PER_RESULT,
+              HIGHLIGHT_SCORED_CHUNKS,
             );
             h.highlights = sel.passages.map((p) => ({
               offset: p.offset,
