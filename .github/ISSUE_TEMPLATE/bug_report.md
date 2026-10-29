@@ -27,7 +27,6 @@ What actually happened. Include error messages or logs if available.
 - searxng-mcp version:
 - Node.js version (`node --version`):
 - Optional services enabled (check all that apply):
-  - [ ] Firecrawl
   - [ ] Crawl4AI
   - [ ] Ollama
   - [ ] Reranker

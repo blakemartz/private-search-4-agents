@@ -919,7 +919,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "search_and_fetch",
-    "Search the web, rerank results, then fetch the full content of the top result(s). GitHub URLs are fetched via the GitHub API; all others go through a fetch cascade: Firecrawl → Crawl4AI → raw HTTP. Results and fetched pages are cached. Blocked domains are filtered. Returns the result list plus clean markdown of the fetched pages.",
+    "Search the web, rerank results, then fetch the full content of the top result(s). GitHub URLs are fetched via the GitHub API; all others go through a fetch cascade: Crawl4AI → raw HTTP. Results and fetched pages are cached. Blocked domains are filtered. Returns the result list plus clean markdown of the fetched pages.",
     {
       query: z.string().describe("Search query"),
       category: CategorySchema.describe(
@@ -953,7 +953,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "fetch_url",
-    "Fetch and extract readable content from any URL. GitHub URLs are fetched via the GitHub API; all others go through a fetch cascade: Firecrawl → Crawl4AI → raw HTTP. Returns clean markdown where possible. Content is trimmed to a token budget (default ~2000 tokens / 8000 chars; raise with max_tokens). Results cached for 24 hours. Blocked domains and private/internal addresses are refused.",
+    "Fetch and extract readable content from any URL. GitHub URLs are fetched via the GitHub API; all others go through a fetch cascade: Crawl4AI → raw HTTP. Returns clean markdown where possible. Content is trimmed to a token budget (default ~2000 tokens / 8000 chars; raise with max_tokens). Results cached for 24 hours. Blocked domains and private/internal addresses are refused.",
     {
       url: z.string().url().describe("URL to fetch and extract content from"),
       domain_profile: DomainProfileSchema,
@@ -971,14 +971,14 @@ export function registerTools(server: McpServer): void {
         .max(500)
         .optional()
         .describe(
-          "CSS selector to scope extraction to a specific element (e.g. 'article', 'main .content'). Honored by Firecrawl/Crawl4AI and applied client-side on the raw-HTTP tier; ignored by fast paths and if it matches nothing.",
+          "CSS selector to scope extraction to a specific element (e.g. 'article', 'main .content'). Honored by Crawl4AI and applied client-side on the raw-HTTP tier; ignored by fast paths and if it matches nothing.",
         ),
       wait_for_selector: z
         .string()
         .max(500)
         .optional()
         .describe(
-          "CSS selector to wait for before extracting, for JS-rendered pages. Honored by the rendering tiers (Firecrawl/Crawl4AI); ignored on raw HTTP (no JS).",
+          "CSS selector to wait for before extracting, for JS-rendered pages. Honored by the rendering tier (Crawl4AI); ignored on raw HTTP (no JS).",
         ),
     },
     handleFetchUrl,
@@ -1020,7 +1020,7 @@ export function registerTools(server: McpServer): void {
     "crawl_site",
     "Crawl a site and return a manifest of pages with titles and snippets. " +
       "Full page content is cached — call fetch_url on any page URL for the full text. " +
-      "Strategy: Firecrawl (JS rendering) → sitemap-first → BFS (if enabled). " +
+      "Strategy: sitemap-first → BFS (if enabled). " +
       "A start URL with a path (e.g. https://example.com/docs) limits the crawl to pages under that path " +
       "unless include_path is given; include_path '/' crawls the whole site.",
     {
@@ -1073,7 +1073,7 @@ export function registerTools(server: McpServer): void {
     {
       title: "Domain capability stats",
       description:
-        "Read the searxng-mcp domain capability database — what it has learned about hosts from fetches: per-tier success rates (tier1-3 cascade, tier4 wayback, github fast path), llms.txt/robots presence, metadata reachability, and search appearances. Provide `hostname` for one domain's record, or omit it for an aggregate across all tracked domains (per-tier success rates, worst failing domains, seen-but-never-fetched count). Read-only. Aggregate mode reports `truncated: true` if the internal scan cap is hit.",
+        "Read the searxng-mcp domain capability database — what it has learned about hosts from fetches: per-tier success rates (tier2 crawl4ai, tier3 raw, tier4 wayback, github fast path, solver), llms.txt/robots presence, metadata reachability, and search appearances. Provide `hostname` for one domain's record, or omit it for an aggregate across all tracked domains (per-tier success rates, worst failing domains, seen-but-never-fetched count). Read-only. Aggregate mode reports `truncated: true` if the internal scan cap is hit.",
       inputSchema: {
         hostname: z
           .string()

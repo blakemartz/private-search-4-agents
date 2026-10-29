@@ -111,7 +111,6 @@ claude mcp add-json searxng --scope user '{
   "args": ["-y", "@tadmstr/searxng-mcp"],
   "env": {
     "SEARXNG_URL": "http://localhost:8081",
-    "FIRECRAWL_URL": "http://localhost:3002",
     "RERANKER_URL": "http://localhost:8787",
     "OLLAMA_URL": "http://localhost:11434",
     "CACHE_URL": "redis://localhost:6379",
@@ -135,7 +134,6 @@ This writes to `~/.claude.json`. Do not add searxng to `~/.claude/settings.json`
       "args": ["-y", "@tadmstr/searxng-mcp"],
       "env": {
         "SEARXNG_URL": "http://localhost:8081",
-        "FIRECRAWL_URL": "http://localhost:3002",
         "RERANKER_URL": "http://localhost:8787",
         "OLLAMA_URL": "http://localhost:11434",
         "CACHE_URL": "redis://localhost:6379",
@@ -157,7 +155,6 @@ mcpServers:
       - /path/to/searxng-mcp/build/src/index.js
     env:
       SEARXNG_URL: http://localhost:8081
-      FIRECRAWL_URL: http://localhost:3002
       RERANKER_URL: http://localhost:8787
       OLLAMA_URL: http://localhost:11434
       CACHE_URL: redis://localhost:6379

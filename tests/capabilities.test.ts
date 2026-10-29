@@ -5,7 +5,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const CAP_ENV = [
-  "FIRECRAWL_ENABLED",
   "CRAWL4AI_ENABLED",
   "CRAWL4AI_URL",
   "KIWIX_URL",
@@ -35,16 +34,9 @@ describe("capabilityLine", () => {
   it("reports a bare deployment as tier3 on, the rest unverified or off", async () => {
     const { capabilityLine } = await import("../src/capabilities.js");
     expect(capabilityLine()).toBe(
-      "capabilities on=tier3 unverified=tier1,cache,reranker " +
+      "capabilities on=tier3 unverified=cache,reranker " +
         "off=tier2,llm,kiwix,hister,solver,wayback,otel,nats",
     );
-  });
-
-  it("moves tier1 to off when Firecrawl is switched off", async () => {
-    process.env.FIRECRAWL_ENABLED = "false";
-    const { capabilityLine } = await import("../src/capabilities.js");
-    expect(capabilityLine()).toContain("on=tier3 unverified=cache,reranker");
-    expect(capabilityLine()).toMatch(/off=tier1,tier2,/);
   });
 
   it("stays a single line however many capabilities are on", async () => {
@@ -141,6 +133,7 @@ describe("capabilityLine", () => {
   // a statement about configuration and was being rendered as a statement
   // about health. These two assertions are the ones that would have caught it.
   it("never reports a configured-but-uncontacted backend as on", async () => {
+    process.env.CRAWL4AI_URL = "http://crawl4ai:11235";
     process.env.KIWIX_URL = "http://kiwix:8080";
     process.env.LLM_BASE_URL = "http://llm:8000/v1";
     process.env.SOLVER_URL = "http://byparr:8191";
@@ -150,7 +143,7 @@ describe("capabilityLine", () => {
     const { capabilityStates } = await import("../src/capabilities.js");
     const states = capabilityStates();
     for (const backed of [
-      "tier1",
+      "tier2",
       "cache",
       "reranker",
       "llm",
@@ -191,13 +184,14 @@ describe("capabilityLine", () => {
   });
 
   it("agrees with tierConfigured about the tiers", async () => {
-    process.env.FIRECRAWL_ENABLED = "false";
+    process.env.CRAWL4AI_URL = "http://crawl4ai:11235";
+    process.env.CRAWL4AI_ENABLED = "false";
     const { capabilities } = await import("../src/capabilities.js");
     const { tierConfigured } = await import("../src/config.js");
     const caps = capabilities();
     const tiers = tierConfigured();
+    expect(tiers.tier2).toBe(false);
     expect({
-      tier1: caps.tier1,
       tier2: caps.tier2,
       tier3: caps.tier3,
     }).toEqual(tiers);

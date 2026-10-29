@@ -98,7 +98,7 @@ Then point the server at it:
 
 ```bash
 SEARXNG_URL=http://localhost:8081 CACHE_URL=redis://localhost:6381 \
-  FIRECRAWL_ENABLED=false RERANKER_URL= \
+  RERANKER_URL= \
   node build/src/index.js
 ```
 

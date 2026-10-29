@@ -27,7 +27,6 @@ export interface TierSkipDecision {
 }
 
 export const TIER_NAME: Record<TierSlot, TierName> = {
-  tier1: "tier1_firecrawl",
   tier2: "tier2_crawl4ai",
   tier3: "tier3_rawfetch",
 };
@@ -61,7 +60,7 @@ export async function computeTierSkips(
   // Data-driven: skip tiers with success rate < 30% over >=10 attempts.
   const record = await getDomainRecord(url);
   if (record) {
-    for (const slot of ["tier1", "tier2", "tier3"] as const) {
+    for (const slot of ["tier2", "tier3"] as const) {
       if (decisions.has(slot)) continue;
       // Read through the window cutoff: a tier must not stay skipped on the
       // strength of failures from outside the window it claims to measure.

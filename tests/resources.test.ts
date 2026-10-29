@@ -22,7 +22,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // the same gap in events.ts's directly-read env vars.
 const SECRETS = {
   SEARXNG_MCP_AUTH_TOKEN: "sentinel-mcp-auth-token",
-  FIRECRAWL_API_KEY: "sentinel-firecrawl-key",
   CRAWL4AI_API_TOKEN: "sentinel-crawl4ai-token",
   OLLAMA_API_KEY: "sentinel-ollama-key",
   LLM_API_KEY: "sentinel-llm-api-key",
@@ -135,9 +134,10 @@ describe("config://searxng-mcp — credential containment", () => {
   });
 
   it("reports an UNSET credential as false even where config.ts applies a default", async () => {
-    // FIRECRAWL_API_KEY defaults to "placeholder-local" in config.ts. Reading
-    // the export rather than the environment would report a credential the
-    // operator never set — true-looking, and wrong.
+    // config.ts falls back to a default for some of these (e.g. "" for
+    // OLLAMA_API_KEY). Reading the export rather than the environment would
+    // report a credential the operator never set if any such default were ever
+    // non-empty — true-looking, and wrong.
     vi.resetModules();
     for (const k of Object.keys(SECRETS)) vi.stubEnv(k, "");
     const { buildConfigResource } = await import("../src/resources.js");
@@ -150,7 +150,7 @@ describe("config://searxng-mcp — credential containment", () => {
   // pass against a payload that was never at risk.
   it("NEGATIVE CONTROL: the sentinels really are set in the environment", async () => {
     await loadWithSecrets();
-    expect(process.env.FIRECRAWL_API_KEY).toBe(SECRETS.FIRECRAWL_API_KEY);
+    expect(process.env.CRAWL4AI_API_TOKEN).toBe(SECRETS.CRAWL4AI_API_TOKEN);
     expect(process.env.SEARXNG_URL).toContain(URL_PASSWORD);
     expect(process.env.CACHE_URL).toContain(URL_PASSWORD);
   });
@@ -170,14 +170,13 @@ describe("config://searxng-mcp — content", () => {
 
   it("nulls the endpoint of a disabled tier rather than advertising a dead one", async () => {
     vi.resetModules();
-    vi.stubEnv("FIRECRAWL_ENABLED", "false");
+    vi.stubEnv("CRAWL4AI_URL", "http://crawl4ai:11235");
     vi.stubEnv("CRAWL4AI_ENABLED", "false");
     vi.stubEnv("SOLVER_ENABLED", "false");
     const { buildConfigResource } = await import("../src/resources.js");
     const e = buildConfigResource().endpoints;
-    // FIRECRAWL_URL has a non-empty default, so reporting it verbatim would
-    // advertise a tier that is switched off.
-    expect(e.firecrawl).toBeNull();
+    // CRAWL4AI_URL is set here, so reporting it verbatim would advertise a
+    // tier that is switched off.
     expect(e.crawl4ai).toBeNull();
     expect(e.solver).toBeNull();
   });
@@ -196,8 +195,7 @@ describe("config://searxng-mcp — content", () => {
     const { buildConfigResource } = await loadWithSecrets();
     const s = buildConfigResource().settings;
     expect(s).toMatchObject({
-      firecrawl_enabled: expect.any(Boolean),
-      firecrawl_api_version: expect.stringMatching(/^v[12]$/),
+      crawl4ai_enabled: expect.any(Boolean),
       wayback_enabled: expect.any(Boolean),
       solver_enabled: expect.any(Boolean),
       cache_ttl_seconds: expect.any(Number),
@@ -386,7 +384,9 @@ describe("registerResources", () => {
     // Asserted on the WIRE FORMAT, not on the builder's return value — the
     // serialisation step is where a toJSON or a getter could reintroduce one.
     expect(String(entry?.text)).not.toContain(URL_PASSWORD);
-    expect(String(entry?.text)).not.toContain(SECRETS.FIRECRAWL_API_KEY);
+    for (const secret of Object.values(SECRETS)) {
+      expect(String(entry?.text)).not.toContain(secret);
+    }
   });
 });
 

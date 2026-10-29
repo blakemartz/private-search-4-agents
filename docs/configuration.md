@@ -10,12 +10,7 @@ All service URLs are configurable via environment variables.
 | `SEARXNG_TOTAL_TIMEOUT_MS` | `10000` | Total timeout budget for one search **across all instances**, not per instance. Iterating N replicas at the per-attempt timeout each would make a total outage take longer to report the more replicas you add. |
 | `SEARXNG_ATTEMPT_TIMEOUT_MS` | `10000` | Per-instance ceiling, further capped by whatever remains of `SEARXNG_TOTAL_TIMEOUT_MS`. |
 | `SEARXNG_UNHEALTHY_TTL_SECONDS` | `30` | How long a failed instance is deprioritised for. A hint that reorders candidates, not a circuit breaker — an unhealthy instance is moved to the back, never removed, and if every instance is marked down the full list is still tried. Stored in the cache so the hint is shared across processes; a cache outage degrades to "try every instance in configured order". |
-| `FIRECRAWL_URL` | `http://localhost:3002` | Firecrawl instance URL |
-| `FIRECRAWL_API_VERSION` | `v1` | Which Firecrawl API to speak — `v1` or `v2`. Any other value **fails at startup** rather than silently constructing a URL that 404s. See [Firecrawl API version](#firecrawl-api-version). |
-| `FIRECRAWL_WAIT_FOR_MS` | `2000` | Under `v2` only: how long a scrape waits for the page to settle when `wait_for_selector` is requested. v2 has no selector-based wait — see the capability boundary below. |
-| `FIRECRAWL_ENABLED` | `true` | Set to `false` when no Firecrawl is deployed — tier 1 is then skipped with `reason: not_configured` instead of attempting a connection on every fetch |
 | `RERANKER_URL` | `http://localhost:8787` | Reranker instance URL |
-| `FIRECRAWL_API_KEY` | `placeholder-local` | Firecrawl API key (if required) |
 | `GITHUB_TOKEN` | *(unset)* | GitHub personal access token — increases rate limit from 60 to 5,000 req/hour |
 | `OLLAMA_URL` | *(unset)* | Ollama API base URL — required for `expand` and `search_and_summarize` |
 | `OLLAMA_API_KEY` | *(unset)* | Bearer token for authenticated Ollama proxies — adds `Authorization: Bearer <key>` header when set |
@@ -36,13 +31,11 @@ All service URLs are configurable via environment variables.
 | `CRAWL_MAX_PAGES_DEFAULT` | `20` | Default max pages returned by `crawl_site` when no `max_pages` is passed |
 | `CRAWL_BFS_ENABLED` | `false` | Set to `true` to enable BFS fallback in `crawl_site` globally. Can also be enabled per-call with the `bfs` parameter. |
 | `CRAWL_BFS_MAX_DEPTH` | `3` | Maximum link-hop depth for BFS crawl |
-| `FIRECRAWL_CRAWL_POLL_INTERVAL_MS` | `2000` | Polling interval when waiting for a Firecrawl crawl job to complete |
-| `FIRECRAWL_CRAWL_MAX_WAIT_MS` | `120000` | Maximum time to wait for a Firecrawl crawl job before falling back to sitemap |
 | `EXPAND_QUERIES` | `false` | Set to `true` to enable query expansion globally |
-| `CRAWL4AI_URL` | *(unset)* | Crawl4AI instance URL — enables second-tier fetch fallback when Firecrawl fails |
+| `CRAWL4AI_URL` | *(unset)* | Crawl4AI instance URL — enables tier 2, the JS-rendering first tier of the fetch cascade. Unset, fetches go straight to tier 3 (raw HTTP) |
 | `CRAWL4AI_ENABLED` | `true` | Set to `false` to skip tier 2 regardless of `CRAWL4AI_URL`. Tier 2 is also skipped when `CRAWL4AI_URL` is unset |
 | `CRAWL4AI_API_TOKEN` | *(unset)* | Optional Bearer token for Crawl4AI instances with API token protection |
-| `WAYBACK_ENABLED` | `false` | Set to `true` to enable Wayback Machine tier-4 fallback — fetches archived snapshots when all three tiers fail |
+| `WAYBACK_ENABLED` | `false` | Set to `true` to enable Wayback Machine tier-4 fallback — fetches archived snapshots when the main tiers fail |
 | `SOLVER_URL` | *(unset)* | Base URL of a Byparr (or other FlareSolverr `POST /v1`-compatible) challenge-solving service, e.g. `http://byparr:8191`. Unset leaves the tier inert regardless of `SOLVER_ENABLED`. |
 | `SOLVER_ENABLED` | `false` | Kill switch for the challenge-solving tier — mirrors `WAYBACK_ENABLED`. Requires `SOLVER_URL` to also be set; fires only when a challenge was actually detected on the current request, never on an unchallenged URL. |
 | `SOLVER_MAX_TIMEOUT_MS` | `60000` | Per-request ceiling passed to the solver as `maxTimeout`. |
@@ -88,20 +81,19 @@ soft. Absence costs quality and latency, never correctness.
 
 | Service | Capability it unlocks | Turn it on with |
 |---------|----------------------|-----------------|
-| [Firecrawl](https://github.com/mendableai/firecrawl) | Fetch tier 1 — Puppeteer-rendered pages, best extraction quality on JS-heavy sites | On by default; `FIRECRAWL_URL`, or `FIRECRAWL_ENABLED=false` to skip the tier |
-| [Crawl4AI](https://github.com/unclecode/crawl4ai) | Fetch tier 2 — browser automation fallback when tier 1 returns empty content | `CRAWL4AI_URL` |
+| [Crawl4AI](https://github.com/unclecode/crawl4ai) — **recommended** | Fetch tier 2, the first tier of the cascade and the only one that renders JavaScript. Without it, JS-heavy pages get whatever tier 3's raw HTML holds | `CRAWL4AI_URL` |
 | [Ollama](https://ollama.com/) with `qwen3:4b` and/or `qwen3:14b`, or any OpenAI-compatible endpoint | Query expansion and LLM-synthesized summaries (`search_and_summarize`) | `OLLAMA_URL` or `LLM_BASE_URL` |
 | [kiwix-serve](https://github.com/kiwix/kiwix-tools) | Offline serving of Wikipedia, Stack Overflow and the Arch Wiki from local ZIM archives | `KIWIX_URL` |
 | Hister | Archived-page fallback from a private archive | `HISTER_URL` |
 | [Byparr](https://github.com/ThePhaseless/Byparr) or FlareSolverr | Solves Cloudflare-style interstitials on the domains that serve them | `SOLVER_URL` + `SOLVER_ENABLED=true` |
-| Wayback Machine | Tier-4 fallback to an archived snapshot when all three tiers fail | `WAYBACK_ENABLED=true` |
+| Wayback Machine | Tier-4 fallback to an archived snapshot when the main tiers fail | `WAYBACK_ENABLED=true` |
 | An OTLP collector / NATS | Traces and metrics; a JetStream event stream of every search and fetch | `OTEL_EXPORTER_OTLP_ENDPOINT` / `NATS_URL` |
 
 On startup the server logs one line naming exactly which of these are configured, so a
 lower-quality result set can be traced to a missing service rather than guessed at:
 
 ```
-[searxng-mcp] capabilities on=tier3 unverified=none off=tier1,tier2,cache,reranker,llm,kiwix,hister,solver,wayback,otel,nats
+[searxng-mcp] capabilities on=tier3 unverified=none off=tier2,cache,reranker,llm,kiwix,hister,solver,wayback,otel,nats
 ```
 
 That example is the minimal run from the README's Quick Start, measured 2026-09-07 — not an
@@ -147,50 +139,9 @@ docker run -d -p 127.0.0.1:8787:8787 ghcr.io/tadmstr/searxng-mcp-reranker:latest
 
 `RERANKER_URL` already defaults to `http://localhost:8787`, so nothing else needs configuring. [`docker/reranker/README.md`](../docker/reranker/README.md) covers the request/response contract, the model, and why it is baked into the image. Any other service speaking the same endpoint works too.
 
-## Firecrawl (optional — fetch tier 1)
+## Crawl4AI (recommended — fetch tier 2)
 
-Any Firecrawl-compatible instance works. The local [firecrawl-simple](https://github.com/mendableai/firecrawl/tree/main/apps/api) deployment is sufficient. Set `FIRECRAWL_API_KEY` if your instance requires authentication (defaults to `placeholder-local` for local deployments that skip auth).
-
-### Firecrawl API version
-
-`FIRECRAWL_API_VERSION` selects which API the client speaks — `v1` (default) or `v2`. The two
-are not interchangeable and no backend serves both:
-
-| Backend | Version | Notes |
-|---|---|---|
-| [firecrawl-simple](https://github.com/devflowinc/firecrawl-simple) | `v1` | Serves `/v1/scrape` and `/v1/crawl` only. No `/map`. |
-| [Upstream Firecrawl 2.x](https://github.com/firecrawl/firecrawl) | `v2` | Serves `/v2/scrape`, `/v2/crawl` and `/v2/map`. |
-
-An unrecognised value fails at startup rather than falling back. That is deliberate: a wrong
-version prefix produces a 404 that `crawl_site` would swallow into its sitemap fallback, and a
-wholly dead code path returning healthy-looking manifests is exactly how the `/v2`-against-`v1`
-mismatch survived unnoticed for the life of the feature.
-
-**Capability boundary under `v2` self-hosting.** Upstream Firecrawl implements page `actions`,
-screenshots and the stealth proxy in **Fire-engine**, which is closed-source and cloud-only.
-Every engine a self-hosted deployment can reach (`fetch`, `playwright`, `pdf`, `document`)
-reports `actions: false`, and a scrape carrying an `actions` array is rejected outright with
-HTTP 400 `SCRAPE_ACTIONS_NOT_SUPPORTED` — the whole request fails, it does not degrade.
-
-The practical consequence is one **semantic downgrade**:
-
-| Tuning parameter | Under `v1` | Under `v2` |
-|---|---|---|
-| `target_selector` | `includeTags` | `includeTags` — unchanged |
-| `wait_for_selector` | a real wait action on the selector | `waitFor`, a **fixed delay** of `FIRECRAWL_WAIT_FOR_MS` |
-
-Under `v2`, `wait_for_selector` waits on *time*, not on the selector. The page may still be
-unsettled when the delay elapses, and the delay is paid in full even when the selector was
-already present. If that matters for a given site, tier 2 (Crawl4AI) does support real
-selector waits and the cascade will reach it when tier 1 returns nothing useful.
-
-The LLM-backed scrape formats (`json`, `summary`, `query`, `highlights`) are also unavailable
-on a self-hosted deployment without an LLM endpoint configured on the backend; searxng-mcp
-does not request them.
-
-## Crawl4AI (optional — fetch tier 2)
-
-[Crawl4AI](https://github.com/unclecode/crawl4ai) is an optional second-tier fetch fallback used when Firecrawl returns empty content (bot-blocked pages, JS-heavy sites). Set `CRAWL4AI_URL` to enable it. If unset, the cascade skips to raw HTTP fetch.
+[Crawl4AI](https://github.com/unclecode/crawl4ai) is the first tier of the fetch cascade and the only one that renders JavaScript (JS-heavy sites, `wait_for_selector`). Set `CRAWL4AI_URL` to enable it. If unset, the cascade skips to raw HTTP fetch.
 
 ```bash
 docker run -d -p 11235:11235 \

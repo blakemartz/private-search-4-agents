@@ -9,9 +9,9 @@ Every outbound fetch to a caller-influenced or discovered URL — the raw-HTTP t
 1. **String check** (`assertPublicUrl`) — rejects non-HTTP(S) URLs and private/internal IP *literals*: RFC1918 (`10.x`, `192.168.x`, `172.16–31.x`), loopback (`127.x`, `::1`), link-local / cloud metadata (`169.254.x`), CGNAT (`100.64/10`), IPv6 ULA (`fc00::/7`) and link-local (`fe80::/10`), IPv4-mapped, and multicast/reserved ranges.
 2. **Connect-time DNS validation** — a shared undici dispatcher whose `connect.lookup` validates the *resolved* address (the exact one the socket connects to). This closes the DNS-rebinding / TOCTOU gap where a public hostname resolves to a private address, and it re-runs on **every redirect hop**, so a redirect chain cannot bounce into your internal network.
 
-Firecrawl (tier1) and Crawl4AI (tier2) resolve and fetch the target URL themselves, so the connect-time dispatcher above can't cover them. `fetchPage` and `crawlSite` call `assertResolvedPublic(url)` — a one-time hostname resolution rejecting any private/reserved result — immediately before dispatching to either service, closing the common DNS-rebinding case on that path (narrower TOCTOU window than the connect-time guard, since the service re-resolves).
+Crawl4AI (tier2) resolves and fetches the target URL itself, so the connect-time dispatcher above can't cover it. `fetchPage` and `crawlSite` call `assertResolvedPublic(url)` — a one-time hostname resolution rejecting any private/reserved result — immediately before dispatching to it, closing the common DNS-rebinding case on that path (narrower TOCTOU window than the connect-time guard, since the service re-resolves).
 
-Configured internal services (Firecrawl, Crawl4AI, SearXNG, Ollama, Reranker) are reached by their own URLs and are intentionally not guarded.
+Configured internal services (Crawl4AI, SearXNG, Ollama, Reranker, Kiwix, Hister, the solver) are reached by their own URLs and are intentionally not guarded.
 
 ## Redirect protection
 
@@ -27,7 +27,7 @@ Every response body read from a third party, and the one request body this serve
 
 | Read | Limit | Notes |
 |---|---|---|
-| Fetch tiers (raw, Firecrawl, Crawl4AI, solver, Wayback, Reddit, YouTube, GitHub, sitemap/crawl) | `RAW_HTML_MAX_BYTES` (2 MB) | Shared `readBoundedText` helper. |
+| Fetch tiers (raw, Crawl4AI, solver, Wayback, Reddit, YouTube, GitHub, sitemap/crawl) | `RAW_HTML_MAX_BYTES` (2 MB) | Shared `readBoundedText` helper. |
 | `llms-full.txt` probe | `MAX_SIZE_BYTES` (64 MB) | Read one byte past the ceiling so an oversized document is still *detected* as oversized and reported absent, rather than truncated to the limit and served as if complete. |
 | HTTP transport request body | `HTTP_MAX_BODY_BYTES` (1 MB) | `initialize` path only; `413` on exceeding. |
 
@@ -45,7 +45,7 @@ CI runs `pnpm audit` on every push. The lockfile (`pnpm-lock.yaml`) is committed
 
 Basic-auth credentials embedded in `SEARXNG_URL` are extracted at startup and sent as an `Authorization` header; the URL used for the request, for cache keys, for log lines, for NATS events and for error messages is always the credential-free origin. This matters more than it looks: Node's `fetch` refuses a URL containing userinfo outright and puts the whole URL — password included — into the resulting `TypeError`'s message, so leaving credentials in the URL would both break every request and leak the password into any sink that forwards an error message.
 
-No credentials are stored or logged by the server. API keys (`FIRECRAWL_API_KEY`, `GITHUB_TOKEN`, `CRAWL4AI_API_TOKEN`) are read from environment variables and used only in outbound requests to their respective services.
+No credentials are stored or logged by the server. API keys (`GITHUB_TOKEN`, `CRAWL4AI_API_TOKEN`) are read from environment variables and used only in outbound requests to their respective services.
 
 ## Input validation
 

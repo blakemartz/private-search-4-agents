@@ -203,7 +203,7 @@ export const ssrfGuardedDispatcher: Dispatcher = new Agent({
 /**
  * Resolve a URL's hostname and throw if any resolved address is
  * private/reserved. Use this before handing a URL to an **external fetcher**
- * (Firecrawl/Crawl4AI) that resolves and connects on our behalf and therefore
+ * (Crawl4AI) that resolves and connects on our behalf and therefore
  * can't be covered by {@link ssrfGuardedDispatcher} (which only guards our own
  * connections). Unlike the connect-time guard this has a TOCTOU window — the
  * external service re-resolves later and could get a different answer — but it

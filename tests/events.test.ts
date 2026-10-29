@@ -37,7 +37,7 @@ describe("events — no-op mode (NATS_URL unset)", () => {
     expect(() =>
       events.fetchTierMiss({
         url: "https://example.com",
-        tier: "tier1_firecrawl",
+        tier: "tier2_crawl4ai",
         reason: "miss",
         latency_ms: 12,
       }),
@@ -45,7 +45,7 @@ describe("events — no-op mode (NATS_URL unset)", () => {
     expect(() =>
       events.fetchCompleted({
         url: "https://example.com",
-        tier_served: "tier1_firecrawl",
+        tier_served: "tier2_crawl4ai",
         title: "T",
         text_len: 100,
         latency_ms: 50,

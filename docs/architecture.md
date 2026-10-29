@@ -15,14 +15,12 @@ MCP client (stdio)
       ├── fetch content ────┬→ GitHub API (github.com)    → markdown
       │                     ├→ Kiwix ($KIWIX_URL)         → ZIM content (Wikipedia/SO/Arch Wiki, fast path)
       │                     ├→ Hister ($HISTER_URL)       → browsing-history index (login-walled/JS-heavy fast path)
-      │                     ├→ Firecrawl ($FIRECRAWL_URL) → page markdown (tier 1)
-      │                     ├→ Crawl4AI ($CRAWL4AI_URL)  → page markdown (tier 2, optional; direct — no proxy, see below)
+      │                     ├→ Crawl4AI ($CRAWL4AI_URL)  → page markdown (tier 2, first tier; optional, direct — no proxy, see below)
       │                     ├→ Raw HTTP + Readability     → page markdown (tier 3 fallback; via $ADBLOCK_PROXY_URL if set)
       │                     ├→ Byparr solver (opt-in)     → challenge-solved page markdown (only on a detected challenge, $SOLVER_ENABLED)
       │                     └→ Wayback Machine (opt-in)  → archived page markdown (tier 4, $WAYBACK_ENABLED)
-      ├── crawl_site ───────┬→ Firecrawl crawl           → page manifest (phase 1)
-      │                     ├→ Sitemap parsing           → page manifest (phase 2 fallback, fast-xml-parser)
-      │                     └→ BFS crawl (opt-in)        → page manifest (phase 3, $CRAWL_BFS_ENABLED)
+      ├── crawl_site ───────┬→ Sitemap parsing           → page manifest (phase 1, fast-xml-parser)
+      │                     └→ BFS crawl (opt-in)        → page manifest (phase 2, $CRAWL_BFS_ENABLED)
       └── summarize (opt.) →  Ollama ($OLLAMA_URL)        → synthesized summary ($OLLAMA_SUMMARIZE_MODEL)
 ```
 
@@ -37,9 +35,8 @@ flowchart TD
     llms_fetch["Probe /llms-full.txt\nextract matching section\n→ return"]
     kiwix{"Kiwix host?\nKIWIX_URL set"}
     kiwix_fetch["Local Kiwix ZIM\nWikipedia · Stack Overflow · Arch Wiki\n→ cache + return"]
-    robots["robots.txt pre-check — tiers 1–3\ndisallowed → RobotsDisallowedError (cached 24h)"]
+    robots["robots.txt pre-check — tiers 2–3\ndisallowed → RobotsDisallowedError (cached 24h)"]
     tier_skip(["Per-domain tier skip\nsuccess rate &lt;30% over ≥10 tries\nor tier_skip operator override"])
-    t1["Tier 1 — Firecrawl\n$FIRECRAWL_URL\nserves PDFs under FIRECRAWL_API_VERSION=v2"]
     t2["Tier 2 — Crawl4AI\n$CRAWL4AI_URL · optional\ndirect — no adblock proxy"]
     t3["Tier 3 — Raw HTTP + Readability\nfallback: raw HTML slice\nadblock proxy if $ADBLOCK_PROXY_URL"]
     challenge(["Challenge detected\non this URL, this request?"])
@@ -58,9 +55,7 @@ flowchart TD
     kiwix -->|yes| kiwix_fetch
     kiwix -->|no| robots
     robots --> tier_skip
-    tier_skip --> t1
-    t1 -->|success| post
-    t1 -->|"empty / error"| t2
+    tier_skip --> t2
     t2 -->|success| post
     t2 -->|"empty / error"| t3
     t3 -->|success| post
@@ -83,7 +78,6 @@ flowchart TD
     style kiwix_fetch fill:#fff9c4,stroke:#b8860b,color:#000000
     style robots fill:#ffffff,stroke:#333333,color:#000000
     style tier_skip fill:#f5f5f5,stroke:#666666,color:#000000
-    style t1 fill:#d5e8d4,stroke:#5a8a4a,color:#000000
     style t2 fill:#d5e8d4,stroke:#5a8a4a,color:#000000
     style t3 fill:#d5e8d4,stroke:#5a8a4a,color:#000000
     style challenge fill:#f5f5f5,stroke:#666666,color:#000000
@@ -93,53 +87,27 @@ flowchart TD
     style result fill:#ffffff,stroke:#333333,color:#000000
 ```
 
-**Only SearXNG is required.** Every tier below it is optional: Firecrawl, Crawl4AI, Valkey, Ollama, Kiwix, the reranker, the solver and Wayback each improve a named dimension, and the server degrades gracefully when any of them is unavailable. Tier 3 is a raw HTTP fetch plus Readability running in-process, so `fetch_url` still returns extracted content with nothing else deployed. Set `FIRECRAWL_ENABLED=false` and leave `CRAWL4AI_URL` unset to say so explicitly — those tiers are then skipped with `reason: not_configured` rather than attempted and missed.
+**Only SearXNG is required.** Every tier below it is optional: Crawl4AI, Valkey, Ollama, Kiwix, the reranker, the solver and Wayback each improve a named dimension, and the server degrades gracefully when any of them is unavailable. Tier 3 is a raw HTTP fetch plus Readability running in-process, so `fetch_url` still returns extracted content with nothing else deployed. Leave `CRAWL4AI_URL` unset (or set `CRAWL4AI_ENABLED=false`) and tier 2 is skipped with `reason: not_configured` rather than attempted and missed.
+
+**There is no tier 1.** It was Firecrawl, removed in this fork; the cascade starts at Crawl4AI. The slot names `tier2`/`tier3` were deliberately not renumbered, because they are persisted in domain-db records and in `tier_skip` config.
+
+**PDFs are not extracted.** No tier in this build parses PDF text; a PDF URL fails at tier 3 with `PDF content cannot be extracted — no tier in this build parses PDF text`.
 
 ## Adblocking
 
-searxng-mcp ships two adblocking sidecars, but only one of them applies to every deployment:
+One adblocking sidecar ships, and it covers tier 3 only:
 
 | Sidecar | Tier | Mechanism | Applies when |
 |---------|------|-----------|--------------|
 | `docker/adblock-proxy/` | Tier 3 (raw fetch) only | HTTP forward proxy — filters plain-HTTP ad domains | `ADBLOCK_PROXY_URL` is set |
-| `docker/puppeteer-adblock/` | Tier 1 (Firecrawl) | CDP-level interception in the browser service | **Only** on a `v1` firecrawl-simple stack. `examples/compose.full.yml` is v2, so this does nothing there |
 
-### Tier 1 — Puppeteer adblock (v1 stacks only)
-
-`docker/puppeteer-adblock/` builds an image layering `@ghostery/adblocker-puppeteer` over `trieve/puppeteer-service-ts`. EasyList + EasyPrivacy are loaded at startup and refreshed every 168 hours, and the blocker is applied to every page Firecrawl creates.
-
-**It is not automatic, and it does not apply under `FIRECRAWL_API_VERSION=v2`:**
-
-- It reaches a deployment only if that deployment builds it. `examples/compose.full.yml` in this repo does; a Firecrawl stack brought up from upstream's own compose, or any stack pointing `PLAYWRIGHT_MICROSERVICE_URL` at a stock `trieve/puppeteer-service-ts` image, does not — tier 1 then has no adblocking, silently.
-- It is Puppeteer-specific. Upstream Firecrawl 2.x replaced the Puppeteer service with `apps/playwright-service-ts`, so on a `v2` backend this image is not part of the stack at all. Porting it would mean rewriting against `@ghostery/adblocker-playwright`, not rebuilding.
-
-To check rather than assume, confirm the browser container carries the hook:
-
-```bash
-docker exec <firecrawl-browser-container> ls node_modules/@ghostery
-```
-
-Env vars, read by that image only:
-
-| Var | Default | Description |
-|-----|---------|-------------|
-| `ADBLOCK_DISABLE` | _unset_ | Set to `true` to skip filter loading entirely. |
-| `ADBLOCK_FILTERS_URL` | EasyList + EasyPrivacy | Comma-separated list of filter list URLs. |
-| `ADBLOCK_REFRESH_HOURS` | `168` | Cadence at which the blocker rebuilds from the configured URLs. |
-
-The base image is pinned by SHA256 digest. To rebuild and restart it:
-
-```bash
-docker compose -f examples/compose.full.yml up -d --build firecrawl-puppeteer
-```
-
-**Per-domain bypass:** `domains.json` reserves an `adblock_skip` slot for future operator overrides. Wiring isn't implemented — it would require Firecrawl to forward a custom header through to the browser service, which isn't part of its API. Tracked as scope-creep item I.
+**Per-domain bypass:** `domains.json` reserves an `adblock_skip` slot for future operator overrides. It is a schema slot only — nothing reads it yet. Tracked as scope-creep item I.
 
 ### Tier 3 — Adblock proxy
 
 Set `ADBLOCK_PROXY_URL` (e.g. `http://adblock-proxy:8118`) to route raw Node fetch requests through an HTTP forward proxy that filters ad and tracker requests.
 
-**This applies to tier 3 only. Tier 2 does not use it, and must not.** Tier 3 resolves the proxy hostname *in this process*; a proxy passed to Crawl4AI is resolved by *Crawl4AI*, inside its own container, which is a different network position entirely. Sending it was a 100% tier-2 outage until v3.25.0 — every crawl returned `net::ERR_PROXY_CONNECTION_FAILED` and was recorded as an ordinary empty result (vikunja#690). Crawl4AI 0.9.x additionally rejects the field at its trust boundary with HTTP 400. Adblocking for tier 2 would have to be configured server-side on Crawl4AI, which is a deployment change rather than a client one. HTTPS CONNECT tunnels are passed through unmodified — no MITM, so filtering applies to plain-HTTP ad domains only. Where the tier-1 hook above is in play it handles HTTPS filtering for that tier; where it is not — including every `v2` deployment — nothing filters tier 1 at all.
+**This applies to tier 3 only. Tier 2 does not use it, and must not.** Tier 3 resolves the proxy hostname *in this process*; a proxy passed to Crawl4AI is resolved by *Crawl4AI*, inside its own container, which is a different network position entirely. Sending it was a 100% tier-2 outage until v3.25.0 — every crawl returned `net::ERR_PROXY_CONNECTION_FAILED` and was recorded as an ordinary empty result (vikunja#690). Crawl4AI 0.9.x additionally rejects the field at its trust boundary with HTTP 400. Adblocking for tier 2 would have to be configured server-side on Crawl4AI, which is a deployment change rather than a client one. HTTPS CONNECT tunnels are passed through unmodified — no MITM, so filtering applies to plain-HTTP ad domains only.
 
 As of v3.19.0, the proxy validates the **resolved** address — not just the requested hostname string — on both its CONNECT and plain-HTTP paths before connecting, closing a DNS-rebinding gap (audit finding SSRF-10).
 
@@ -154,8 +122,8 @@ Before invoking the fetch cascade, searxng-mcp reads the domain's `tier_stats_30
 ```json
 {
   "tier_skip": {
-    "example-bot-blocked.com": ["tier1"],
-    "another-site.example": ["tier1", "tier2"]
+    "example-bot-blocked.com": ["tier2"],
+    "another-site.example": ["tier2", "tier3"]
   }
 }
 ```
@@ -164,7 +132,7 @@ Before invoking the fetch cascade, searxng-mcp reads the domain's `tier_stats_30
 
 ## Content-type fast path
 
-A URL serving structured, non-HTML content — `application/json`, any `*+json`, XML, YAML, TOML, CSV, or `text/plain` — is detected via a `HEAD` probe and routed straight to the raw-HTTP tier instead of the full Firecrawl/Crawl4AI cascade. JSON is returned pretty-printed inside a fenced code block. Previously, asking a headless browser to render a JSON API response or CDN asset returned empty markdown, so API and CDN endpoints (`registry.npmjs.org`, `api.osv.dev`, `cdn.jsdelivr.net`, …) simply failed.
+A URL serving structured, non-HTML content — `application/json`, any `*+json`, XML, YAML, TOML, CSV, or `text/plain` — is detected via a `HEAD` probe and routed straight to the raw-HTTP tier instead of through Crawl4AI. JSON is returned pretty-printed inside a fenced code block. Previously, asking a headless browser to render a JSON API response or CDN asset returned empty markdown, so API and CDN endpoints (`registry.npmjs.org`, `api.osv.dev`, `cdn.jsdelivr.net`, …) simply failed.
 
 Guarantees:
 - The probe is **fail-open**. An unreachable host, a server that refuses `HEAD`, or an unreadable/unparseable `Content-Type` header all fall through to the normal cascade unchanged.
@@ -173,9 +141,9 @@ Guarantees:
 
 ## Domain capability database
 
-Every fetch records what searxng-mcp learns about the target domain to Valkey under `domain:<hostname>` (90-day TTL, schema_version 6). Captured per record:
+Every fetch records what searxng-mcp learns about the target domain to Valkey under `domain:<hostname>` (90-day TTL, schema_version 7). Captured per record:
 
-- `tier_stats_30d.{tier1,tier2,tier3,tier4,solver,github}.{attempts, ok, fail, last_fail_reason, window_start_ms}` — fetch success rate per tier over a rolling 30-day window. The cutoff is applied at **read time**, shared by tier-routing decisions and `domain_stats` reporting, so the two cannot disagree — a domain fetched once and then left idle reports a genuinely empty window rather than stale numbers surviving until the next write. The `tier4` (Wayback Machine) slot is recorded only when `WAYBACK_ENABLED=true`; the `solver` slot (Byparr challenge-solving tier, see [Challenge detection and solver tier](#challenge-detection-and-solver-tier)) only when `SOLVER_ENABLED=true`. The `github` slot records the [GitHub fast path](tools.md#github-urls) (`raw.githubusercontent.com` / `api.github.com` / `github.com` README fetches), which bypasses the tier cascade but is still tracked here. A `schema_version` bump rebuilds existing records fresh — accumulated windows for currently-idle domains are discarded (precedented across the 1→2, 2→3, 3→4, 4→5, 5→6 bumps).
+- `tier_stats_30d.{tier2,tier3,tier4,solver,github}.{attempts, ok, fail, last_fail_reason, window_start_ms}` — fetch success rate per tier over a rolling 30-day window. The cutoff is applied at **read time**, shared by tier-routing decisions and `domain_stats` reporting, so the two cannot disagree — a domain fetched once and then left idle reports a genuinely empty window rather than stale numbers surviving until the next write. The `tier4` (Wayback Machine) slot is recorded only when `WAYBACK_ENABLED=true`; the `solver` slot (Byparr challenge-solving tier, see [Challenge detection and solver tier](#challenge-detection-and-solver-tier)) only when `SOLVER_ENABLED=true`. The `github` slot records the [GitHub fast path](tools.md#github-urls) (`raw.githubusercontent.com` / `api.github.com` / `github.com` README fetches), which bypasses the tier cascade but is still tracked here. A `schema_version` bump rebuilds existing records fresh — accumulated windows for currently-idle domains are discarded (precedented across the 1→2 through 6→7 bumps). Removing Firecrawl did **not** bump the version: records written by upstream builds still carry `tier1` and `crawl` slots, which nothing reads and which are stripped on the next write.
 - `capabilities.metadata_fetch.{attempts, ok, fail, last_fail_reason}` — success/failure of the metadata side-channel fetch (`fetchRawHtmlForMetadata`, used for JSON-LD/og:title sampling). Tracked separately from `tier_stats_30d` since it answers "is this domain reachable at all", not "did full-content delivery succeed".
 - `capabilities.seen_in_search.{count, last_seen_ms}` — how often the domain appears in `search` results. Written fire-and-forget by `searxSearch()` on every return path (including cache hits) with no fetch performed, so a domain can be tracked before it is ever fetched.
 - `capabilities.robots_txt.{present, fetched, allows_us}` — robots.txt presence and whether it permits us
@@ -213,16 +181,15 @@ pnpm restore-domain-db       # re-seed the domain-db from the newest snapshot af
 
 ## llms.txt fast path
 
-For whitelisted documentation domains in `domains.json` (`llms_txt` array), `fetchPage` tries `<origin>/llms-full.txt` first and extracts the section matching the requested URL before invoking any tier. This avoids running puppeteer against well-instrumented docs sites and returns a clean markdown section directly. Probe outcomes and the full body are cached in Valkey (`llms:<origin>:full`, 24 h / 7 d for present/absent). Default whitelist: `docs.anthropic.com`, `docs.openai.com`, `docs.stripe.com`, `docs.crawl4ai.com`, `docs.firecrawl.dev`, `docs.cursor.com`. Extend by editing `domains.json` — the file is hot-reloaded.
+For whitelisted documentation domains in `domains.json` (`llms_txt` array), `fetchPage` tries `<origin>/llms-full.txt` first and extracts the section matching the requested URL before invoking any tier. This avoids running a headless browser against well-instrumented docs sites and returns a clean markdown section directly. Probe outcomes and the full body are cached in Valkey (`llms:<origin>:full`, 24 h / 7 d for present/absent). Default whitelist: `docs.anthropic.com`, `docs.openai.com`, `docs.stripe.com`, `docs.crawl4ai.com`, `docs.firecrawl.dev`, `docs.cursor.com`. Extend by editing `domains.json` — the file is hot-reloaded.
 
 A document is accepted only if it is between 1 KB and 64 MB; anything outside that is treated as absent and falls through to the normal tier cascade. The upper bound is a capability boundary as much as a memory one — for reference, `docs.anthropic.com/llms-full.txt` was 40.3 MB as of 2026-09-03, so lowering it much further would drop that domain off the fast path.
 
 ## Kiwix fast path
 
 When `KIWIX_URL` is set, fetch requests for known offline-capable hosts are intercepted
-before the Firecrawl/Crawl4AI cascade and served from the local [Kiwix](https://kiwix.org/)
-ZIM archive. This eliminates the 100% tier-1 failure rate for sites like Wikipedia (which
-blocks headless scrapers) and returns clean readable content with zero external network traffic.
+before the tier cascade and served from the local [Kiwix](https://kiwix.org/)
+ZIM archive. This sidesteps headless-scraper blocking on sites like Wikipedia and returns clean readable content with zero external network traffic.
 
 Supported hosts and ZIM books (kiwix-serve must run with `--nodatealiases` / `-z`):
 
@@ -251,17 +218,12 @@ Both rely on **unofficial, undocumented endpoints** (YouTube's timedtext API, Re
 
 ## Site crawling
 
-`crawl_site` crawls an entire site and returns a manifest of URL/title/snippet for each page found. It uses a four-phase strategy cascade:
+`crawl_site` crawls a site and returns a manifest of URL/title/snippet for each page found. It uses a two-phase strategy cascade:
 
-1. **Firecrawl crawl** — sends a crawl job to Firecrawl (`/crawl`), polls until complete, and returns the full page list. Targets `/v1/crawl` or `/v2/crawl` per `FIRECRAWL_API_VERSION`. Controlled by `FIRECRAWL_CRAWL_POLL_INTERVAL_MS` and `FIRECRAWL_CRAWL_MAX_WAIT_MS`.
-2. **Firecrawl map** (`v2` only) — asks `/v2/map` for the site's URLs, then fetches them. Purpose-built for exactly what phase 3 hand-rolls, and it copes with sites whose sitemap is absent, stale or split across nested indexes. Skipped entirely under `v1`, where the endpoint does not exist.
-3. **Sitemap parsing** — fetches `/sitemap.xml` (and linked sitemaps) and extracts URLs with titles/snippets. Uses `fast-xml-parser` for sitemap XML parsing.
-4. **BFS crawl** (opt-in) — if sitemap parsing also fails, performs a breadth-first crawl starting from the given URL up to `CRAWL_BFS_MAX_DEPTH` link hops. Only runs when `CRAWL_BFS_ENABLED=true` or the `bfs` tool parameter is `true`.
+1. **Sitemap parsing** — fetches `/sitemap.xml` (and linked sitemaps) and extracts URLs, then fetches each page through the normal fetch cascade. Uses `fast-xml-parser` for sitemap XML parsing.
+2. **BFS crawl** (opt-in) — if sitemap parsing yields nothing, performs a breadth-first crawl starting from the given URL up to `CRAWL_BFS_MAX_DEPTH` link hops. Only runs when `CRAWL_BFS_ENABLED=true`.
 
-Each phase falls through to the next, but **no longer silently**: a non-2xx from the crawl
-start, the crawl poll or the map endpoint is logged and recorded against the `crawl` slot in
-the per-domain stats, so `domain_stats` answers "does the Firecrawl phase ever succeed here?"
-without needing a live probe.
+A start URL with a path (`https://example.com/docs`) confines both phases to pages under that path unless `include_path` is given; `include_path: "/"` crawls the whole site.
 
 Full page content fetched during the crawl is cached in Valkey (TTL: `CRAWL_MANIFEST_TTL_SECONDS`, default 6 hours). Subsequent `fetch_url` calls for any URL in the manifest return immediately from cache — zero fetch overhead for follow-up reads.
 
@@ -269,7 +231,7 @@ The manifest cache can be cleared with `clear_cache(target="crawl")`.
 
 ## Wayback Machine fallback
 
-When `WAYBACK_ENABLED=true`, a fourth tier queries the Wayback Machine CDX API for an archived snapshot when all three main tiers fail. Returned content is prefixed with a provenance header (`[Archived snapshot – <timestamp> – <original_url>]`) so callers know the content may not reflect the current page state.
+When `WAYBACK_ENABLED=true`, a last-resort tier queries the Wayback Machine CDX API for an archived snapshot when the main tiers fail. Returned content is prefixed with a provenance header (`[Archived snapshot – <timestamp> – <original_url>]`) so callers know the content may not reflect the current page state.
 
 ## Challenge detection and solver tier
 
@@ -277,7 +239,7 @@ A Cloudflare-style challenge interstitial is frequently served with **HTTP 200**
 Managed Challenge and Turnstile — which used to pass straight through the tier cascade as a
 successful fetch: Readability-extracted, cached, and written to the domain capability database
 as evidence the tier works on that domain, feeding tier-skip decisions on nothing but a wrong
-signal. As of v3.19.0, tiers 1–3 detect this case (matched on Cloudflare edge headers at
+signal. As of v3.19.0, tiers 2–3 detect this case (matched on Cloudflare edge headers at
 403/503, and on interstitial markers in a 200-status body) and report it as a distinct miss
 (`reason: challenge_detected`) instead of a hit. A detected challenge is never cached and never
 written to domain-db.
@@ -345,7 +307,7 @@ Tracing, metrics, and event publishing are entirely opt-in — with none of the 
 
 **OpenTelemetry (traces + metrics)** — set `OTEL_EXPORTER_OTLP_ENDPOINT` to your collector's HTTP endpoint and the server emits:
 
-- Spans (per request): `tool.<name>` → `expand_query`? → `searxng_request` → `rerank` → `fetch` (×N) → `tier1_firecrawl` | `tier2_crawl4ai` | `tier3_rawfetch` | `solver_byparr` → `post_extract`; plus `summarize_llm` for `search_and_summarize`.
+- Spans (per request): `tool.<name>` → `expand_query`? → `searxng_request` → `rerank` → `fetch` (×N) → `tier2_crawl4ai` | `tier3_rawfetch` | `solver_byparr` → `post_extract`; plus `summarize_llm` for `search_and_summarize`.
 - Counters: `searxng_search_total{profile, expand}`, `searxng_fetch_total{tier, outcome}`, `searxng_cache_total{namespace, outcome}`, `searxng_errors_total{stage, error_type}`.
 - Histograms: `searxng_search_duration_seconds{profile}`, `searxng_fetch_duration_seconds{tier, outcome}`.
 

@@ -26,7 +26,7 @@
 # THE CAPABILITY LINE THIS RUNG PRINTS — measured 2026-09-07:
 #
 #   capabilities on=tier3 unverified=tier2,cache,reranker \
-#     off=tier1,llm,kiwix,hister,solver,wayback,otel,nats
+#     off=llm,kiwix,hister,solver,wayback,otel,nats
 #
 # The ONLY difference from rung 2 is `reranker` moving from `off` to
 # `unverified`, and that is only legible because rung 2 explicitly sets
@@ -40,7 +40,7 @@
 # does not mean one failed search.
 #
 # MOVING UP A RUNG
-#   Add Firecrawl, Ollama, Kiwix, NATS and the adblock proxy
+#   Add Ollama, Kiwix, NATS and the adblock proxy
 #   → examples/compose.full.yml (rung 4).
 
 # See rung 1's note: shared project name is deliberate (vikunja#694).
@@ -63,8 +63,8 @@ services:
     # `GET /` 200, and `?format=json` 200.
     #
     # An earlier draft of this file granted SETUID and SETGID here, reasoning by
-    # analogy from `cache` and `firecrawl-redis` (whose entrypoints DO drop
-    # privileges with setpriv and do need them). SearXNG's does not, and the
+    # analogy from `cache` (whose entrypoint DOES drop privileges with
+    # setpriv and does need them). SearXNG's does not, and the
     # comment asserted a verification that had never been run. Two capabilities
     # were being handed to an adopter's container for no reason.
     #
@@ -210,12 +210,6 @@ services:
       CRAWL4AI_URL: http://crawl4ai:11235
       CRAWL4AI_API_TOKEN: "${CRAWL4AI_API_TOKEN:-}"
 
-      # Still off: no Firecrawl at this rung, and FIRECRAWL_URL defaults to
-      # http://localhost:3002, so without this every fetch attempts a dead tier 1
-      # first and books the failure into the domain capability database — which
-      # then routes around a tier that was never broken, only absent.
-      FIRECRAWL_ENABLED: "false"
-
       # NEW at this rung — the whole point of it.
       RERANKER_URL: http://reranker:8787
     # The image's own healthcheck is correct from this rung up: a cache IS
@@ -234,4 +228,3 @@ services:
 #   CRAWL4AI_URL         http://localhost:11235
 #   CRAWL4AI_API_TOKEN   <same value as above>
 #   RERANKER_URL         http://localhost:8787
-#   FIRECRAWL_ENABLED    false

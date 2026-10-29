@@ -78,7 +78,7 @@ function isCloudflareEdge(headers: Headers | null | undefined): boolean {
  * worse than the bug this closes.
  *
  * `headers` and `body` are both optional: a tier that only has one of them
- * (Crawl4AI and Firecrawl return a rendered document with no origin headers)
+ * (Crawl4AI returns a rendered document with no origin headers)
  * passes null for the other.
  */
 export function detectChallenge(

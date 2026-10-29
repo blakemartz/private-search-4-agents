@@ -46,18 +46,15 @@ const TIER_SLOTS = TIER_SLOT_KEYS;
  * A `Record<TierSlotKey, ...>` rather than a list of `tierLine(...)` calls,
  * which is what this block used to be: an array literal is not
  * exhaustiveness-checked, so a slot added to TIER_SLOT_KEYS but missed here
- * would record forever and never appear in single-domain output — the same
- * class of invisibility that let crawl_site's Firecrawl phase 404 unnoticed for
- * the life of the feature. Missing a key here is now a compile error.
+ * would record forever and never appear in single-domain output. Missing a key
+ * here is a compile error.
  */
 const TIER_SLOT_LABELS: Record<TierSlotKey, string> = {
-  tier1: "tier1 (firecrawl)",
   tier2: "tier2 (crawl4ai) ",
   tier3: "tier3 (raw)      ",
   tier4: "tier4 (wayback)  ",
   github: "github (fastpath)",
   solver: "solver (byparr)  ",
-  crawl: "crawl (firecrawl)",
 };
 
 // A domain is "failing" if it has enough attempts to judge and a low overall

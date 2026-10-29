@@ -96,16 +96,16 @@ vi.mock("../src/extractors/post-extract.js", () => ({
 // vi.mock factories are hoisted above module-scope consts, so the tier stubs
 // have to be created inside vi.hoisted or the factory hits them in the TDZ.
 const tiers = vi.hoisted(() => ({
-  tier1Fetch: vi.fn(),
   tier2Fetch: vi.fn(),
+  tier3Fetch: vi.fn(),
 }));
-const { tier1Fetch, tier2Fetch } = tiers;
+const { tier2Fetch, tier3Fetch } = tiers;
 
 vi.mock("../src/routing.js", () => ({
   getTiers: vi.fn().mockResolvedValue({
     active: [
-      { name: "tier1_firecrawl", slot: "tier1", fetch: tiers.tier1Fetch },
       { name: "tier2_crawl4ai", slot: "tier2", fetch: tiers.tier2Fetch },
+      { name: "tier3_rawfetch", slot: "tier3", fetch: tiers.tier3Fetch },
     ],
     skipped: [],
   }),
@@ -133,17 +133,17 @@ const recordTierAttemptMock = vi.mocked(recordTierAttempt);
 beforeEach(() => {
   vi.clearAllMocks();
   probeMock.mockResolvedValue(null);
-  tier1Fetch.mockResolvedValue({ title: "t1", url: "u", text: "html body" });
-  tier2Fetch.mockResolvedValue(null);
+  tier2Fetch.mockResolvedValue({ title: "t2", url: "u", text: "html body" });
+  tier3Fetch.mockResolvedValue(null);
 });
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("fetchPage — content-type fast path", () => {
-  it("routes a JSON endpoint to tier3 rawFetch and never invokes tier1", async () => {
-    // The live failure this replaces: registry.npmjs.org served JSON to
-    // Firecrawl, which returned empty markdown and was booked as an
-    // `empty_result` tier1 miss.
+  it("routes a JSON endpoint to tier3 rawFetch and never invokes the browser tier", async () => {
+    // The live failure this replaces: registry.npmjs.org served JSON to a
+    // rendering tier, which returned empty markdown and was booked as an
+    // `empty_result` miss against that tier.
     probeMock.mockResolvedValue("json");
     rawFetchMock.mockResolvedValue({
       title: "https://registry.npmjs.org/express",
@@ -154,14 +154,14 @@ describe("fetchPage — content-type fast path", () => {
     const result = await fetchPage("https://registry.npmjs.org/express");
 
     expect(rawFetchMock).toHaveBeenCalledOnce();
-    expect(tier1Fetch).not.toHaveBeenCalled();
     expect(tier2Fetch).not.toHaveBeenCalled();
+    expect(tier3Fetch).not.toHaveBeenCalled();
     expect(result.text).toContain('"name": "express"');
   });
 
-  it("books the fast path as a tier3 attempt, not tier1", async () => {
+  it("books the fast path as a tier3 attempt, not tier2", async () => {
     // Accounting matters as much as the routing: this is what stops the
-    // domain-db recording JSON hosts as tier1 failures.
+    // domain-db recording JSON hosts as browser-tier failures.
     probeMock.mockResolvedValue("json");
     rawFetchMock.mockResolvedValue({
       title: "u",
@@ -178,7 +178,7 @@ describe("fetchPage — content-type fast path", () => {
     );
     expect(
       recordTierAttemptMock.mock.calls.some(
-        (call) => call[1] === "tier1_firecrawl",
+        (call) => call[1] === "tier2_crawl4ai",
       ),
     ).toBe(false);
   });
@@ -187,7 +187,7 @@ describe("fetchPage — content-type fast path", () => {
     probeMock.mockResolvedValue(null);
     await fetchPage("https://example.com/page");
     expect(rawFetchMock).not.toHaveBeenCalled();
-    expect(tier1Fetch).toHaveBeenCalledOnce();
+    expect(tier2Fetch).toHaveBeenCalledOnce();
   });
 
   it("falls through to the cascade when the fast path's raw fetch fails", async () => {
@@ -199,8 +199,8 @@ describe("fetchPage — content-type fast path", () => {
     const result = await fetchPage("https://api.codetabs.com/v1/proxy");
 
     expect(rawFetchMock).toHaveBeenCalledOnce();
-    expect(tier1Fetch).toHaveBeenCalledOnce();
-    expect(result.text).toBe("html body"); // tier1's body — the cascade served it
+    expect(tier2Fetch).toHaveBeenCalledOnce();
+    expect(result.text).toBe("html body"); // tier2's body — the cascade served it
   });
 
   it("routes every structured kind, not just JSON", async () => {
@@ -213,7 +213,7 @@ describe("fetchPage — content-type fast path", () => {
         rawFetchMock,
         `${kind} should take the fast path`,
       ).toHaveBeenCalledOnce();
-      expect(tier1Fetch, `${kind} should skip tier1`).not.toHaveBeenCalled();
+      expect(tier2Fetch, `${kind} should skip tier2`).not.toHaveBeenCalled();
     }
   });
 });

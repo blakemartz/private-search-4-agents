@@ -145,7 +145,7 @@ describe("publishEvent — connected", () => {
     m.events.fetchRequested({ url: "https://e/x", max_chars: 100 });
     m.events.fetchTierMiss({
       url: "https://e/x",
-      tier: "tier1",
+      tier: "tier3",
       reason: "empty",
       latency_ms: 3,
     });

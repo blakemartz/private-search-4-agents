@@ -102,7 +102,6 @@ vi.mock("../src/extractors/post-extract.js", () => ({
 }));
 
 const tiers = vi.hoisted(() => ({
-  tier1Fetch: vi.fn(),
   tier3Fetch: vi.fn(),
   getTiers: vi.fn(),
 }));
@@ -112,7 +111,6 @@ vi.mock("../src/routing.js", () => ({
   // The real map. A stubbed-empty TIER_NAME would render every skipped tier as
   // `undefined:` and the assertions below would pass on a blank name.
   TIER_NAME: {
-    tier1: "tier1_firecrawl",
     tier2: "tier2_crawl4ai",
     tier3: "tier3_rawfetch",
   },
@@ -135,12 +133,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   tiers.getTiers.mockResolvedValue({
     active: [
-      { name: "tier1_firecrawl", slot: "tier1", fetch: tiers.tier1Fetch },
       { name: "tier3_rawfetch", slot: "tier3", fetch: tiers.tier3Fetch },
     ],
     skipped: [{ tier: "tier2", reason: "not_configured" }],
   });
-  tiers.tier1Fetch.mockResolvedValue(null);
   tiers.tier3Fetch.mockResolvedValue(null);
 });
 
@@ -154,17 +150,17 @@ describe("fetchPage — terminal failure names every tier", () => {
       /tier2_crawl4ai: skipped \(not_configured\)/,
     );
     await expect(fetchPage(URL_)).rejects.toThrow(
-      /tier1_firecrawl: attempted, no content/,
+      /tier3_rawfetch: attempted, no content/,
     );
   });
 
   it("surfaces the underlying error from a tier that threw", async () => {
-    tiers.tier1Fetch.mockRejectedValue(
-      new Error("Firecrawl error: 502 Bad Gateway"),
+    tiers.tier3Fetch.mockRejectedValue(
+      new Error("Raw fetch error: 502 Bad Gateway"),
     );
 
     await expect(fetchPage(URL_)).rejects.toThrow(
-      /tier1_firecrawl: Firecrawl error: 502 Bad Gateway/,
+      /tier3_rawfetch: Raw fetch error: 502 Bad Gateway/,
     );
   });
 
@@ -176,11 +172,11 @@ describe("fetchPage — terminal failure names every tier", () => {
   });
 
   it("bounds an unbounded upstream error rather than relaying it whole", async () => {
-    // Firecrawl's `data.error` is upstream-controlled text of arbitrary length,
-    // and this is the first change that relays a tier's own error to the caller
-    // instead of swallowing it. An error message is not a transport for an
-    // arbitrary upstream payload.
-    tiers.tier1Fetch.mockRejectedValue(new Error("X".repeat(5000)));
+    // A tier's error text can be upstream-controlled and of arbitrary length
+    // (Crawl4AI's error prose, for one), and this path relays a tier's own
+    // error to the caller instead of swallowing it. An error message is not a
+    // transport for an arbitrary upstream payload.
+    tiers.tier3Fetch.mockRejectedValue(new Error("X".repeat(5000)));
 
     const err = await fetchPage(URL_).catch((e: Error) => e);
     const message = String(err);
@@ -190,19 +186,20 @@ describe("fetchPage — terminal failure names every tier", () => {
     // The other tiers must still be named — truncating one reason must not
     // swallow the rest of the diagnostic.
     expect(message).toContain("tier2_crawl4ai: skipped (not_configured)");
-    expect(message).toContain("tier3_rawfetch");
+    // ...and the truncated reason stays attributed to its own tier.
+    expect(message).toContain("tier3_rawfetch: XXX");
   });
 
   it("leaves a normal-length reason intact", async () => {
     // Negative control for the cap: without this, a bound that truncated
     // everything would satisfy the test above.
-    tiers.tier1Fetch.mockRejectedValue(
-      new Error("Firecrawl error: 502 Bad Gateway"),
+    tiers.tier3Fetch.mockRejectedValue(
+      new Error("Raw fetch error: 502 Bad Gateway"),
     );
 
     const err = await fetchPage(URL_).catch((e: Error) => e);
     expect(String(err)).toContain(
-      "tier1_firecrawl: Firecrawl error: 502 Bad Gateway",
+      "tier3_rawfetch: Raw fetch error: 502 Bad Gateway",
     );
     expect(String(err)).not.toContain("…");
   });
@@ -213,11 +210,7 @@ describe("fetchPage — terminal failure names every tier", () => {
 
   it("names every tier that took part, none omitted", async () => {
     const err = await fetchPage(URL_).catch((e: Error) => e);
-    for (const tier of [
-      "tier1_firecrawl",
-      "tier2_crawl4ai",
-      "tier3_rawfetch",
-    ]) {
+    for (const tier of ["tier2_crawl4ai", "tier3_rawfetch"]) {
       expect(String(err)).toContain(tier);
     }
   });

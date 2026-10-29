@@ -30,13 +30,11 @@ function mkRecord(domain: string, lastFetch: string): DomainRecord {
     last_fetch: lastFetch,
     capabilities: {},
     tier_stats_30d: {
-      tier1: emptyStat(),
       tier2: emptyStat(),
       tier3: emptyStat(),
       tier4: emptyStat(),
       github: emptyStat(),
       solver: emptyStat(),
-      crawl: emptyStat(),
     },
   };
 }

@@ -56,9 +56,6 @@ import {
   CRAWL4AI_URL,
   EXPAND_QUERIES_DEFAULT,
   FETCH_CACHE_TTL_SECONDS,
-  FIRECRAWL_API_VERSION,
-  FIRECRAWL_ENABLED,
-  FIRECRAWL_URL,
   HISTER_URL,
   KIWIX_URL,
   LLM_BASE_URL,
@@ -96,8 +93,7 @@ const safeUrl = (u: string | null | undefined): string | null =>
  *
  * Reported as booleans in `credentials_configured`. Read from `process.env`
  * directly rather than from config.ts's exports, because a default applied
- * there — FIRECRAWL_API_KEY falls back to "placeholder-local" — would report a
- * credential the operator never set.
+ * there would report a credential the operator never set.
  *
  * NATS_USER is deliberately absent: it is a username, not a secret, and
  * NATS_PASSWORD already answers "is NATS authentication configured".
@@ -111,7 +107,6 @@ const safeUrl = (u: string | null | undefined): string | null =>
  */
 export const CREDENTIAL_ENV = [
   "SEARXNG_MCP_AUTH_TOKEN",
-  "FIRECRAWL_API_KEY",
   "CRAWL4AI_API_TOKEN",
   "OLLAMA_API_KEY",
   "LLM_API_KEY",
@@ -146,7 +141,6 @@ export function buildConfigResource() {
       searxng: SEARXNG_URLS.map((u) => safeUrl(u)),
       cache: safeUrl(CACHE_URL),
       reranker: safeUrl(RERANKER_URL),
-      firecrawl: FIRECRAWL_ENABLED ? safeUrl(FIRECRAWL_URL) : null,
       crawl4ai: CRAWL4AI_ENABLED ? safeUrl(CRAWL4AI_URL) : null,
       ollama: safeUrl(OLLAMA_URL),
       llm_base: safeUrl(LLM_BASE_URL),
@@ -158,8 +152,6 @@ export function buildConfigResource() {
 
     // Behaviour switches and tunables. No secrets here by construction.
     settings: {
-      firecrawl_enabled: FIRECRAWL_ENABLED,
-      firecrawl_api_version: FIRECRAWL_API_VERSION,
       crawl4ai_enabled: CRAWL4AI_ENABLED,
       wayback_enabled: WAYBACK_ENABLED,
       solver_enabled: SOLVER_ENABLED,

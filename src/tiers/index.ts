@@ -1,5 +1,4 @@
 export { applyTier2Readability, crawl4aiFetch } from "./crawl4ai.js";
-export { firecrawlScrape } from "./firecrawl.js";
 export { githubFetch, isGithubFastPathUrl, isGithubUrl } from "./github.js";
 export { fetchRawHtmlForMetadata, rawFetch } from "./raw.js";
 export { buildScopedCookieHeader, solverFetch } from "./solver.js";
@@ -8,34 +7,18 @@ export { waybackFetch } from "./wayback.js";
 
 import { assertNoChallengeBody } from "../challenge.js";
 import { applyTier2Readability, crawl4aiFetch } from "./crawl4ai.js";
-import { firecrawlScrape } from "./firecrawl.js";
 import { rawFetch } from "./raw.js";
 import type { Tier } from "./types.js";
 
-// Tier 1 and tier 2 reach the origin through an external fetcher, so they hand
-// back a rendered document with no origin status or headers — only the body
-// rules in detectChallenge can apply. The check sits here at the tier boundary
-// rather than inside firecrawlScrape/crawl4aiFetch so one rule covers both
-// tiers and raises ChallengeDetectedError by the same path for each. Both
-// representations are passed because the markers live in the markup and the
-// markdown/text projection strips them.
+// Tier 2 reaches the origin through an external fetcher, so it hands back a
+// rendered document with no origin status or headers — only the body rules in
+// detectChallenge can apply. Both representations are passed because the
+// markers live in the markup and the markdown/text projection strips them.
 //
-// This used to carry a second reason: that crawl4aiFetch swallowed every throw
-// and returned null, so the signal had to be raised outside it. That is no
-// longer true. As of vikunja#690 tier 2 throws its backend failures the way
-// tier 1 always has, and returns null only for a genuinely empty result.
-
-/** Tier 1 — Firecrawl (Puppeteer-rendered, best quality). */
-export const tier1: Tier = {
-  name: "tier1_firecrawl",
-  slot: "tier1",
-  async fetch(url, maxChars, _preferFit, tuning) {
-    const r = await firecrawlScrape(url, maxChars, tuning);
-    if (!r?.text) return null;
-    assertNoChallengeBody(r.html, r.text);
-    return r;
-  },
-};
+// There is no tier 1. It was Firecrawl, removed in this fork: the cascade
+// starts at Crawl4AI. The slot names are kept as tier2/tier3 rather than
+// renumbered because they are persisted in domain-db records and `tier_skip`
+// config, and live processes on the old build share that database.
 
 /** Tier 2 — Crawl4AI (browser automation + Readability post-processing). */
 export const tier2: Tier = {
@@ -59,4 +42,4 @@ export const tier3: Tier = {
 };
 
 /** Canonical ordered tier list. Order determines cascade priority. */
-export const ALL_TIERS: readonly Tier[] = [tier1, tier2, tier3];
+export const ALL_TIERS: readonly Tier[] = [tier2, tier3];

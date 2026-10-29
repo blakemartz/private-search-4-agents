@@ -43,7 +43,7 @@ const BLOCKED_HOSTNAMES = [
 export function assertPublicUrl(url: string): void {
   const parsed = new URL(url);
   // http:// is intentionally permitted: Wayback Machine snapshots, some legacy
-  // sites, and local service integrations (Kiwix, Firecrawl) may use non-TLS
+  // sites, and local service integrations (Kiwix, Crawl4AI) may use non-TLS
   // URLs. Private addresses are blocked below regardless of scheme.
   if (!/^https?:$/.test(parsed.protocol)) {
     throw new Error(`Only http/https URLs are supported`);

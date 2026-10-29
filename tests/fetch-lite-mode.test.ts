@@ -1,20 +1,23 @@
 // Lite mode, end to end through the real routing + real tier objects.
 //
 // The claim under test is negative and cannot be inferred from a green
-// cascade: with Firecrawl and Crawl4AI unconfigured, no connection to either
-// is *attempted*, and neither tier books an attempt in the domain database.
-// A fetch would succeed today either way — slowly, by falling through a failed
-// tier 1 — so asserting on the returned content proves nothing about the fix.
+// cascade: with Crawl4AI unconfigured, no connection to it is *attempted*, and
+// tier 2 books no attempt in the domain database. A fetch would succeed either
+// way — slowly, by falling through a failed tier 2 — so asserting on the
+// returned content proves nothing about the fix.
 //
 // Deliberately narrow mock surface: routing.js and tiers/index.js are REAL, so
 // the skip decisions and the tier objects under them are the shipped ones.
-// Only tiers/raw.js is stubbed, which leaves tier 1's real firecrawlScrape
-// wired to the real global fetch — the call this test asserts never happens.
+// Only tiers/raw.js is stubbed, which leaves tier 2's real crawl4aiFetch wired
+// to the real global fetch — the call this test asserts never happens.
+// CRAWL4AI_URL is pinned to a sentinel so that, in the negative control, an
+// attempt really does reach fetch rather than bailing on a missing URL.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/config.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/config.js")>()),
+  CRAWL4AI_URL: "http://crawl4ai.lite-mode.test:11235",
   tierConfigured: vi.fn(),
 }));
 
@@ -104,8 +107,8 @@ vi.mock("../src/extractors/post-extract.js", () => ({
   }),
 }));
 
-// Tier 3 only. Tier 1 and tier 2 keep their real implementations so that an
-// attempt by either one is observable as a real outbound fetch.
+// Tier 3 only. Tier 2 keeps its real implementation so that an attempt by it
+// is observable as a real outbound fetch.
 vi.mock("../src/tiers/raw.js", () => ({
   rawFetch: vi.fn().mockResolvedValue({
     title: "Example Domain",
@@ -116,7 +119,7 @@ vi.mock("../src/tiers/raw.js", () => ({
   fetchRawHtmlForMetadata: vi.fn().mockResolvedValue(null),
 }));
 
-import { FIRECRAWL_URL, tierConfigured } from "../src/config.js";
+import { CRAWL4AI_URL, tierConfigured } from "../src/config.js";
 import { recordTierAttempt } from "../src/domain-db.js";
 import { fetchPage } from "../src/fetch.js";
 import { incCounter } from "../src/observability.js";
@@ -141,10 +144,9 @@ beforeEach(() => {
   }) as typeof fetch);
 });
 
-describe("lite mode — tier1 and tier2 unconfigured", () => {
+describe("lite mode — tier2 unconfigured", () => {
   beforeEach(() => {
     tierConfiguredMock.mockReturnValue({
-      tier1: false,
       tier2: false,
       tier3: true,
     });
@@ -155,63 +157,56 @@ describe("lite mode — tier1 and tier2 unconfigured", () => {
     expect(out.text).toContain("served by tier 3");
   });
 
-  it("attempts no connection to Firecrawl", async () => {
+  it("attempts no connection to Crawl4AI", async () => {
     await fetchPage(URL_UNDER_TEST);
-    expect(fetchTargets.filter((u) => u.startsWith(FIRECRAWL_URL))).toEqual([]);
+    expect(
+      fetchTargets.filter((u) => u.startsWith(String(CRAWL4AI_URL))),
+    ).toEqual([]);
   });
 
   // The stat-pollution fix. A skipped tier is not an attempt, so nothing may
   // reach the domain database on its behalf — those same numbers feed the
   // low_success_rate routing pass and domain_stats.
-  it("books no domain-db attempt for either skipped tier", async () => {
+  it("books no domain-db attempt for the skipped tier", async () => {
     await fetchPage(URL_UNDER_TEST);
     const tiersRecorded = recordTierAttemptMock.mock.calls.map((c) => c[1]);
-    expect(tiersRecorded).not.toContain("tier1_firecrawl");
     expect(tiersRecorded).not.toContain("tier2_crawl4ai");
     expect(tiersRecorded).toContain("tier3_rawfetch");
   });
 
-  it("counts both skips with their reason", async () => {
+  it("counts the skip with its reason", async () => {
     await fetchPage(URL_UNDER_TEST);
     const skipped = incCounterMock.mock.calls.filter(
       (c) => (c[1] as { outcome?: string })?.outcome === "skipped",
     );
-    expect(skipped.map((c) => c[1])).toEqual(
-      expect.arrayContaining([
-        {
-          tier: "tier1_firecrawl",
-          outcome: "skipped",
-          reason: "not_configured",
-        },
-        {
-          tier: "tier2_crawl4ai",
-          outcome: "skipped",
-          reason: "not_configured",
-        },
-      ]),
-    );
+    expect(skipped.map((c) => c[1])).toEqual([
+      {
+        tier: "tier2_crawl4ai",
+        outcome: "skipped",
+        reason: "not_configured",
+      },
+    ]);
   });
 });
 
 // Negative control. Without this, every assertion above would still pass if
 // the cascade never ran at all, or if fetchPage short-circuited before the
 // tiers for some unrelated reason.
-describe("negative control — tier1 configured", () => {
+describe("negative control — tier2 configured", () => {
   beforeEach(() => {
     tierConfiguredMock.mockReturnValue({
-      tier1: true,
-      tier2: false,
+      tier2: true,
       tier3: true,
     });
   });
 
-  it("does attempt Firecrawl, and books the failed attempt", async () => {
+  it("does attempt Crawl4AI, and books the failed attempt", async () => {
     await fetchPage(URL_UNDER_TEST);
     expect(
-      fetchTargets.filter((u) => u.startsWith(FIRECRAWL_URL)).length,
+      fetchTargets.filter((u) => u.startsWith(String(CRAWL4AI_URL))).length,
     ).toBeGreaterThan(0);
     expect(recordTierAttemptMock.mock.calls.map((c) => c[1])).toContain(
-      "tier1_firecrawl",
+      "tier2_crawl4ai",
     );
   });
 });

@@ -11,7 +11,7 @@
 #   `search`                  yes — ranked results, in SearXNG's own order
 #   `fetch_url`               yes — tier 3 (in-process raw fetch + Readability)
 #   `search_and_fetch`        yes — same tier-3 extraction
-#   `crawl_site`              sitemap / BFS fallback only (no Firecrawl crawl)
+#   `crawl_site`              yes — sitemap, then BFS if CRAWL_BFS_ENABLED
 #   `clear_cache`             no-op — there is no cache to purge
 #   `domain_stats`            yes, but the DB is in-memory and dies with the
 #                             container (no cache backend to persist it)
@@ -21,7 +21,7 @@
 # THE CAPABILITY LINE THIS RUNG PRINTS — measured 2026-09-07, not predicted:
 #
 #   capabilities on=tier3 unverified=none \
-#     off=tier1,tier2,cache,reranker,llm,kiwix,hister,solver,wayback,otel,nats
+#     off=tier2,cache,reranker,llm,kiwix,hister,solver,wayback,otel,nats
 #
 # `unverified=none` is the point of the two empty-string env vars below, and is
 # what makes this a CLEAN minimal run rather than a merely working one. Read on.
@@ -65,8 +65,8 @@ services:
     # `GET /` 200, and `?format=json` 200.
     #
     # An earlier draft of this file granted SETUID and SETGID here, reasoning by
-    # analogy from `cache` and `firecrawl-redis` (whose entrypoints DO drop
-    # privileges with setpriv and do need them). SearXNG's does not, and the
+    # analogy from `cache` (whose entrypoint DOES drop privileges with
+    # setpriv and does need them). SearXNG's does not, and the
     # comment asserted a verification that had never been run. Two capabilities
     # were being handed to an adopter's container for no reason.
     #
@@ -100,27 +100,22 @@ services:
       # anywhere other than 127.0.0.1. See README "HTTP transport authentication".
       SEARXNG_MCP_AUTH_TOKEN: "${SEARXNG_MCP_AUTH_TOKEN:-}"
 
-      # ── The three switches that make this rung CLEAN ────────────────────────
+      # ── The two switches that make this rung CLEAN ──────────────────────────
       #
-      # All three env vars below have NON-EMPTY DEFAULTS in src/config.ts. Left
+      # Both env vars below have NON-EMPTY DEFAULTS in src/config.ts. Left
       # alone, searxng-mcp would spend this entire rung talking to services that
       # are not deployed:
       #
-      #   FIRECRAWL_URL   defaults to http://localhost:3002
       #   CACHE_URL       defaults to redis://localhost:6381
       #   RERANKER_URL    defaults to http://localhost:8787
       #
       # A default URL is indistinguishable from a deliberate one, so without
-      # these the server reports `unverified=cache,reranker` and tier 1 is
-      # attempted-and-failed on every fetch — booking each failure into the
-      # domain capability database, which then routes around a tier that was
-      # never broken, only absent.
+      # these the server reports `unverified=cache,reranker` and every search
+      # and fetch first tries a backend that is not there.
       #
-      # FIRECRAWL_ENABLED is a real kill switch. cache and reranker have none,
-      # so the lever is an EMPTY STRING: config.ts uses `??`, which falls back
-      # only on undefined — an explicit "" survives and reads as "off".
-      # Verified both ways 2026-09-07.
-      FIRECRAWL_ENABLED: "false"
+      # Neither has a kill switch, so the lever is an EMPTY STRING: config.ts
+      # uses `??`, which falls back only on undefined — an explicit "" survives
+      # and reads as "off". Verified both ways 2026-09-07.
       CACHE_URL: ""
       RERANKER_URL: ""
     healthcheck:
@@ -160,5 +155,5 @@ services:
 # searxng-mcp service and use:
 #
 #   SEARXNG_URL=http://localhost:8081 \
-#     FIRECRAWL_ENABLED=false CACHE_URL= RERANKER_URL= \
+#     CACHE_URL= RERANKER_URL= \
 #     npx @tadmstr/searxng-mcp

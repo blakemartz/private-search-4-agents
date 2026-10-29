@@ -18,6 +18,7 @@ import {
   recordSearchAppearance,
   recordTierAttempt,
   shouldSkipJsonLdPostExtract,
+  TIER_SLOT_KEYS,
 } from "../src/domain-db.js";
 
 const cacheGetMock = vi.mocked(cacheGet);
@@ -77,13 +78,13 @@ describe("recordTierAttempt", () => {
 
   it("creates a new record on the first call", async () => {
     const { getStored } = setupAtomicMock(null);
-    await recordTierAttempt("https://example.com/p", "tier1_firecrawl", "hit");
+    await recordTierAttempt("https://example.com/p", "tier2_crawl4ai", "hit");
     const written = lastWrittenRecord(getStored());
     expect(written.domain).toBe("example.com");
     expect(written.schema_version).toBe(7);
-    expect(written.tier_stats_30d.tier1.attempts).toBe(1);
-    expect(written.tier_stats_30d.tier1.ok).toBe(1);
-    expect(written.tier_stats_30d.tier1.window_start_ms).toBeGreaterThan(0);
+    expect(written.tier_stats_30d.tier2.attempts).toBe(1);
+    expect(written.tier_stats_30d.tier2.ok).toBe(1);
+    expect(written.tier_stats_30d.tier2.window_start_ms).toBeGreaterThan(0);
   });
 
   it("updates an existing record incrementally", async () => {
@@ -94,26 +95,24 @@ describe("recordTierAttempt", () => {
       last_fetch: "2026-05-01T00:00:00Z",
       capabilities: {},
       tier_stats_30d: {
-        tier1: { attempts: 2, ok: 1, fail: 1, window_start_ms: Date.now() },
-        tier2: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
+        tier2: { attempts: 2, ok: 1, fail: 1, window_start_ms: Date.now() },
         tier3: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier4: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         github: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         solver: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
-        crawl: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
       },
     };
     const { getStored } = setupAtomicMock(JSON.stringify(seed));
     await recordTierAttempt(
       "https://example.com/p",
-      "tier1_firecrawl",
+      "tier2_crawl4ai",
       "error",
       "timeout",
     );
     const written = lastWrittenRecord(getStored());
-    expect(written.tier_stats_30d.tier1.attempts).toBe(3);
-    expect(written.tier_stats_30d.tier1.fail).toBe(2);
-    expect(written.tier_stats_30d.tier1.last_fail_reason).toBe("timeout");
+    expect(written.tier_stats_30d.tier2.attempts).toBe(3);
+    expect(written.tier_stats_30d.tier2.fail).toBe(2);
+    expect(written.tier_stats_30d.tier2.last_fail_reason).toBe("timeout");
   });
 
   it("resets window counters when window_start_ms is older than 30 days", async () => {
@@ -125,30 +124,28 @@ describe("recordTierAttempt", () => {
       last_fetch: "2026-04-15T00:00:00Z",
       capabilities: {},
       tier_stats_30d: {
-        tier1: {
+        tier2: {
           attempts: 50,
           ok: 5,
           fail: 45,
           last_fail_reason: "old_error",
           window_start_ms: oldWindowMs,
         },
-        tier2: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier3: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier4: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         github: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         solver: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
-        crawl: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
       },
     };
     const { getStored } = setupAtomicMock(JSON.stringify(seed));
-    await recordTierAttempt("https://example.com/p", "tier1_firecrawl", "hit");
+    await recordTierAttempt("https://example.com/p", "tier2_crawl4ai", "hit");
     const written = lastWrittenRecord(getStored());
     // Old window expired — counters reset, then this one attempt recorded
-    expect(written.tier_stats_30d.tier1.attempts).toBe(1);
-    expect(written.tier_stats_30d.tier1.ok).toBe(1);
-    expect(written.tier_stats_30d.tier1.fail).toBe(0);
-    expect(written.tier_stats_30d.tier1.last_fail_reason).toBeUndefined();
-    expect(written.tier_stats_30d.tier1.window_start_ms).toBeGreaterThan(
+    expect(written.tier_stats_30d.tier2.attempts).toBe(1);
+    expect(written.tier_stats_30d.tier2.ok).toBe(1);
+    expect(written.tier_stats_30d.tier2.fail).toBe(0);
+    expect(written.tier_stats_30d.tier2.last_fail_reason).toBeUndefined();
+    expect(written.tier_stats_30d.tier2.window_start_ms).toBeGreaterThan(
       oldWindowMs,
     );
   });
@@ -167,7 +164,7 @@ describe("recordTierAttempt", () => {
     setupAtomicMock(null);
     await recordTierAttempt(
       "https://www.Example.com/p",
-      "tier1_firecrawl",
+      "tier2_crawl4ai",
       "hit",
     );
     const key = cacheAtomicUpdateMock.mock.calls[0][0] as string;
@@ -191,7 +188,7 @@ describe("recordTierAttempt", () => {
     });
 
     await Promise.all([
-      recordTierAttempt("https://example.com/p", "tier1_firecrawl", "hit"),
+      recordTierAttempt("https://example.com/p", "tier2_crawl4ai", "hit"),
       recordRobotsProbe("https://example.com", true, true),
       recordPostExtractSample("https://example.com/p", {
         jsonLdPresent: true,
@@ -200,8 +197,8 @@ describe("recordTierAttempt", () => {
     ]);
 
     const final = JSON.parse(stored as string) as DomainRecord;
-    expect(final.tier_stats_30d.tier1.attempts).toBe(1);
-    expect(final.tier_stats_30d.tier1.ok).toBe(1);
+    expect(final.tier_stats_30d.tier2.attempts).toBe(1);
+    expect(final.tier_stats_30d.tier2.ok).toBe(1);
     expect(final.capabilities.robots_txt?.present).toBe(true);
     expect(final.capabilities.json_ld_article?.sampled).toBe(1);
     expect(final.capabilities.og_title?.sampled).toBe(1);
@@ -213,7 +210,7 @@ describe("recordTierAttempt", () => {
     const written = lastWrittenRecord(getStored());
     expect(written.tier_stats_30d.tier4.attempts).toBe(1);
     expect(written.tier_stats_30d.tier4.ok).toBe(1);
-    expect(written.tier_stats_30d.tier1.attempts).toBe(0);
+    expect(written.tier_stats_30d.tier2.attempts).toBe(0);
   });
 
   it("records github fast-path attempts under tier_stats_30d.github (SXNG-10)", async () => {
@@ -231,7 +228,7 @@ describe("recordTierAttempt", () => {
       "404 Not Found",
     );
     // Github traffic must not leak into any cascade tier.
-    expect(written.tier_stats_30d.tier1.attempts).toBe(0);
+    expect(written.tier_stats_30d.tier2.attempts).toBe(0);
     expect(written.tier_stats_30d.tier3.attempts).toBe(0);
   });
 
@@ -240,8 +237,10 @@ describe("recordTierAttempt", () => {
     // third time this test has moved forward, and the reason it keeps earning
     // its place. The assertion is unchanged in substance: a pre-bump record is
     // rebuilt, not migrated, so accumulated tier stats from a window that never
-    // measured the new slot cannot keep driving tier-skip decisions. A v6
-    // record has no `crawl` slot, which is exactly what makes it unmigratable.
+    // measured the new slot cannot keep driving tier-skip decisions. (The v7
+    // `crawl` slot that made v6 unmigratable has since been removed in this
+    // fork without a bump — see the legacy-slot test below — but the rebuild
+    // rule for pre-v7 records is unchanged.)
     const staleSeed = JSON.stringify({
       schema_version: 6,
       domain: "example.com",
@@ -249,8 +248,7 @@ describe("recordTierAttempt", () => {
       last_fetch: "2026-05-01T00:00:00Z",
       capabilities: {},
       tier_stats_30d: {
-        tier1: { attempts: 40, ok: 2, fail: 38, window_start_ms: Date.now() },
-        tier2: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
+        tier2: { attempts: 40, ok: 2, fail: 38, window_start_ms: Date.now() },
         tier3: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier4: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         github: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
@@ -261,15 +259,58 @@ describe("recordTierAttempt", () => {
     await recordTierAttempt("https://example.com/p", "github", "hit");
     const written = lastWrittenRecord(getStored());
     expect(written.schema_version).toBe(7);
-    // The rebuilt record carries the new slot, zeroed.
-    expect(written.tier_stats_30d.crawl).toEqual(
-      expect.objectContaining({ attempts: 0, ok: 0, fail: 0 }),
+    // The rebuilt record carries exactly the current slot roster.
+    expect(Object.keys(written.tier_stats_30d).sort()).toEqual(
+      [...TIER_SLOT_KEYS].sort(),
     );
-    // Stale tier1 stats discarded on rebuild — a 40-attempt history that would
-    // otherwise have kept tier1 skipped for this domain.
-    expect(written.tier_stats_30d.tier1.attempts).toBe(0);
+    // Stale tier2 stats discarded on rebuild — a 40-attempt history that would
+    // otherwise have kept tier2 skipped for this domain.
+    expect(written.tier_stats_30d.tier2.attempts).toBe(0);
     expect(written.tier_stats_30d.github.attempts).toBe(1);
     expect(written.tier_stats_30d.github.ok).toBe(1);
+  });
+
+  it("strips legacy Firecrawl slots from a schema-7 record on write, keeping live counts", async () => {
+    // Upstream builds (with Firecrawl) write schema-7 records carrying `tier1`
+    // and `crawl` slots, and may set preferred_strategy "tier1". SCHEMA_VERSION
+    // was deliberately not bumped for their removal, so such a record must be
+    // narrowed in place — not rebuilt — on the next write.
+    const legacySeed = JSON.stringify({
+      schema_version: 7,
+      domain: "example.com",
+      first_seen: "2026-05-01T00:00:00Z",
+      last_fetch: "2026-05-01T00:00:00Z",
+      capabilities: {},
+      preferred_strategy: "tier1",
+      tier_stats_30d: {
+        tier1: { attempts: 9, ok: 9, fail: 0, window_start_ms: Date.now() },
+        tier2: { attempts: 4, ok: 3, fail: 1, window_start_ms: Date.now() },
+        tier3: { attempts: 6, ok: 2, fail: 4, window_start_ms: Date.now() },
+        tier4: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
+        github: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
+        solver: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
+        crawl: { attempts: 5, ok: 0, fail: 5, window_start_ms: Date.now() },
+      },
+    });
+    const { getStored } = setupAtomicMock(legacySeed);
+    await recordTierAttempt("https://example.com/p", "tier2_crawl4ai", "hit");
+    const written = lastWrittenRecord(getStored());
+    expect(written.schema_version).toBe(7);
+    expect(written.first_seen).toBe("2026-05-01T00:00:00Z");
+    // Existing counts survive: tier2 incremented, tier3 untouched.
+    expect(written.tier_stats_30d.tier2).toEqual(
+      expect.objectContaining({ attempts: 5, ok: 4, fail: 1 }),
+    );
+    expect(written.tier_stats_30d.tier3).toEqual(
+      expect.objectContaining({ attempts: 6, ok: 2, fail: 4 }),
+    );
+    // Legacy keys gone.
+    expect(Object.keys(written.tier_stats_30d).sort()).toEqual(
+      [...TIER_SLOT_KEYS].sort(),
+    );
+    expect(written.tier_stats_30d).not.toHaveProperty("tier1");
+    expect(written.tier_stats_30d).not.toHaveProperty("crawl");
+    expect(written).not.toHaveProperty("preferred_strategy");
   });
 });
 
@@ -421,13 +462,11 @@ describe("shouldSkipJsonLdPostExtract", () => {
         },
       },
       tier_stats_30d: {
-        tier1: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier2: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier3: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier4: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         github: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         solver: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
-        crawl: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
       },
     };
     cacheGetMock.mockResolvedValue(JSON.stringify(seed));
@@ -450,13 +489,11 @@ describe("shouldSkipJsonLdPostExtract", () => {
         },
       },
       tier_stats_30d: {
-        tier1: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier2: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier3: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier4: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         github: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         solver: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
-        crawl: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
       },
     };
     cacheGetMock.mockResolvedValue(JSON.stringify(seed));
@@ -479,13 +516,11 @@ describe("shouldSkipJsonLdPostExtract", () => {
         },
       },
       tier_stats_30d: {
-        tier1: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier2: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier3: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         tier4: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         github: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
         solver: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
-        crawl: { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() },
       },
     };
     cacheGetMock.mockResolvedValue(JSON.stringify(seed));

@@ -166,13 +166,13 @@ describe("domain_stats advertised output schema", () => {
     vi.mocked(cacheGet).mockResolvedValueOnce(
       JSON.stringify(
         mkRecord("docs.example.com", TIER_SLOT_KEYS, {
-          tier1: stat(10, 9, 1),
+          tier2: stat(10, 9, 1),
         }),
       ),
     );
     const result = await handleDomainStats({ hostname: "docs.example.com" });
 
-    // Guard the guard: if the payload stopped carrying all six slots this test
+    // Guard the guard: if the payload stopped carrying every slot this test
     // would pass for the wrong reason, since absent slots are legal.
     expect(
       Object.keys(result.structuredContent.record?.tiers ?? {}).sort(),
@@ -189,7 +189,7 @@ describe("domain_stats advertised output schema", () => {
         .fn()
         .mockResolvedValueOnce([
           JSON.stringify(
-            mkRecord("good.com", TIER_SLOT_KEYS, { tier1: stat(10, 9, 1) }),
+            mkRecord("good.com", TIER_SLOT_KEYS, { tier2: stat(10, 9, 1) }),
           ),
         ]),
     } as unknown as NonNullable<Awaited<ReturnType<typeof getValkey>>>);
@@ -213,7 +213,7 @@ describe("domain_stats advertised output schema", () => {
   it("accepts a record predating Wayback and the solver — slots absent, not null", async () => {
     // The deployment shape `tier4`/`solver` being `required` would have broken.
     vi.mocked(cacheGet).mockResolvedValueOnce(
-      JSON.stringify(mkRecord("old.example.com", ["tier1", "tier2", "tier3"])),
+      JSON.stringify(mkRecord("old.example.com", ["tier2", "tier3"])),
     );
     const result = await handleDomainStats({ hostname: "old.example.com" });
     const r = await validateAsClient(result.structuredContent);
@@ -233,7 +233,7 @@ describe("domain_stats advertised output schema", () => {
       mget: vi.fn().mockResolvedValueOnce([
         JSON.stringify(
           mkRecord("good.com", TIER_SLOT_KEYS, {
-            tier1: { attempts: 10, ok: 9, fail: 1, window_start_ms: oldest },
+            tier2: { attempts: 10, ok: 9, fail: 1, window_start_ms: oldest },
           }),
         ),
       ]),
@@ -288,7 +288,7 @@ describe("domain_stats advertised output schema", () => {
       mget: vi.fn().mockResolvedValueOnce([
         JSON.stringify(
           mkRecord("good.com", TIER_SLOT_KEYS, {
-            tier1: { attempts: 10, ok: 9, fail: 1, window_start_ms: oldest },
+            tier2: { attempts: 10, ok: 9, fail: 1, window_start_ms: oldest },
           }),
         ),
       ]),
@@ -308,9 +308,9 @@ describe("domain_stats advertised output schema", () => {
         JSON.stringify(
           mkRecord("thin.com", TIER_SLOT_KEYS, {
             // n=4: one outcome either way moves the rate by 25 points.
-            tier1: { attempts: 4, ok: 0, fail: 4, window_start_ms: NOW },
+            tier2: { attempts: 4, ok: 0, fail: 4, window_start_ms: NOW },
             // n=5: the first sample size the rate is rendered for.
-            tier2: { attempts: 5, ok: 0, fail: 5, window_start_ms: NOW },
+            tier3: { attempts: 5, ok: 0, fail: 5, window_start_ms: NOW },
           }),
         ),
       ]),
@@ -318,11 +318,11 @@ describe("domain_stats advertised output schema", () => {
 
     const text = (await handleDomainStats({})).content[0]?.text ?? "";
 
-    expect(text).toContain("tier1  : insufficient data (0/4)");
-    expect(text).toContain("tier2  : 0% ok (0/5)");
+    expect(text).toContain("tier2  : insufficient data (0/4)");
+    expect(text).toContain("tier3  : 0% ok (0/5)");
     // "no data" must stay distinct from "barely any data" — three states, not
     // two.
-    expect(text).toContain("tier3  : no data");
+    expect(text).toContain("tier4  : no data");
   });
 
   // ── Negative controls ─────────────────────────────────────────────────────
@@ -367,7 +367,7 @@ describe("domain_stats advertised output schema", () => {
     expect(r.valid).toBe(false);
   });
 
-  it("reproduces vikunja#637: a hand-listed five-slot schema rejects the real payload", async () => {
+  it("reproduces vikunja#637: a hand-listed schema missing one slot rejects the real payload", async () => {
     // This is the regression itself, held in place. If someone reverts the
     // derivation to a literal that omits a slot, THIS is the shape that breaks
     // — and it breaks here rather than in production.
@@ -377,13 +377,15 @@ describe("domain_stats advertised output schema", () => {
       fail: z.number(),
       success_rate: z.number().nullable(),
     });
-    const handListedFive = z.object(
+    // One slot short of the roster — at the time of #637 that was five of
+    // six, with `solver` the one left out.
+    const handListedShort = z.object(
       Object.fromEntries(
-        TIER_SLOT_KEYS.slice(0, 5).map((s) => [s, TierStats]),
+        TIER_SLOT_KEYS.slice(0, -1).map((s) => [s, TierStats]),
       ) as Record<string, typeof TierStats>,
     );
     const staleSchema = toJsonSchemaCompat(
-      z.object({ tiers: handListedFive }),
+      z.object({ tiers: handListedShort }),
       { strictUnions: true, pipeStrategy: "output" },
     );
 

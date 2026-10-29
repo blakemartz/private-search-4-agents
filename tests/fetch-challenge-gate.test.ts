@@ -99,16 +99,14 @@ vi.mock("../src/extractors/post-extract.js", () => ({
 }));
 
 const tiers = vi.hoisted(() => ({
-  tier1Fetch: vi.fn(),
   tier2Fetch: vi.fn(),
   tier3Fetch: vi.fn(),
 }));
-const { tier1Fetch, tier2Fetch, tier3Fetch } = tiers;
+const { tier2Fetch, tier3Fetch } = tiers;
 
 vi.mock("../src/routing.js", () => ({
   getTiers: vi.fn().mockResolvedValue({
     active: [
-      { name: "tier1_firecrawl", slot: "tier1", fetch: tiers.tier1Fetch },
       { name: "tier2_crawl4ai", slot: "tier2", fetch: tiers.tier2Fetch },
       { name: "tier3_rawfetch", slot: "tier3", fetch: tiers.tier3Fetch },
     ],
@@ -153,7 +151,6 @@ function challenge() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  tier1Fetch.mockResolvedValue(null);
   tier2Fetch.mockResolvedValue(null);
   tier3Fetch.mockResolvedValue(null);
   solverFetchMock.mockResolvedValue(null);
@@ -164,13 +161,13 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("fetchPage — a detected challenge is a miss, not a hit", () => {
   it("records the tier attempt as a miss with reason challenge_detected", async () => {
-    tier1Fetch.mockRejectedValue(challenge());
+    tier2Fetch.mockRejectedValue(challenge());
 
     await expect(fetchPage(URL)).rejects.toThrow("All fetch tiers failed");
 
     expect(recordTierAttemptMock).toHaveBeenCalledWith(
       URL,
-      "tier1_firecrawl",
+      "tier2_crawl4ai",
       "miss",
       "challenge_detected",
     );
@@ -179,17 +176,17 @@ describe("fetchPage — a detected challenge is a miss, not a hit", () => {
   it("does not record the challenged tier as a hit", async () => {
     // The stats-corruption half of the defect: an interstitial booked as a hit
     // is evidence the tier works on this domain, and drives tier-skip routing.
-    tier1Fetch.mockRejectedValue(challenge());
+    tier2Fetch.mockRejectedValue(challenge());
 
     await expect(fetchPage(URL)).rejects.toThrow("All fetch tiers failed");
 
     expect(
       recordTierAttemptMock.mock.calls.some(
-        (call) => call[1] === "tier1_firecrawl" && call[2] === "hit",
+        (call) => call[1] === "tier2_crawl4ai" && call[2] === "hit",
       ),
     ).toBe(false);
     expect(incCounterMock).not.toHaveBeenCalledWith("fetch", {
-      tier: "tier1_firecrawl",
+      tier: "tier2_crawl4ai",
       outcome: "hit",
     });
   });
@@ -197,27 +194,27 @@ describe("fetchPage — a detected challenge is a miss, not a hit", () => {
   it("counts a miss, not an error", async () => {
     // The tier reached the origin and got a well-formed response — it just
     // wasn't content. Booking it as an error would misreport tier health.
-    tier1Fetch.mockRejectedValue(challenge());
+    tier2Fetch.mockRejectedValue(challenge());
 
     await expect(fetchPage(URL)).rejects.toThrow("All fetch tiers failed");
 
     expect(incCounterMock).toHaveBeenCalledWith("fetch", {
-      tier: "tier1_firecrawl",
+      tier: "tier2_crawl4ai",
       outcome: "miss",
     });
     expect(incCounterMock).not.toHaveBeenCalledWith("fetch", {
-      tier: "tier1_firecrawl",
+      tier: "tier2_crawl4ai",
       outcome: "error",
     });
   });
 
   it("emits the distinct miss reason, not the generic empty_result", async () => {
-    tier1Fetch.mockRejectedValue(challenge());
+    tier2Fetch.mockRejectedValue(challenge());
 
     await expect(fetchPage(URL)).rejects.toThrow("All fetch tiers failed");
 
     const reasons = fetchTierMissMock.mock.calls
-      .filter((call) => call[0].tier === "tier1_firecrawl")
+      .filter((call) => call[0].tier === "tier2_crawl4ai")
       .map((call) => call[0].reason);
     expect(reasons).toContain("challenge_detected");
     expect(reasons).not.toContain("empty_result");
@@ -226,7 +223,6 @@ describe("fetchPage — a detected challenge is a miss, not a hit", () => {
   it("never writes an interstitial to the fetch cache", async () => {
     // Deployed FETCH_CACHE_TTL_SECONDS is 259200, so a poisoned entry would
     // have persisted three days.
-    tier1Fetch.mockRejectedValue(challenge());
     tier2Fetch.mockRejectedValue(challenge());
     tier3Fetch.mockRejectedValue(challenge());
 
@@ -236,10 +232,10 @@ describe("fetchPage — a detected challenge is a miss, not a hit", () => {
   });
 
   it("lets a later tier still serve the page after an earlier one is challenged", async () => {
-    // A challenge on tier1 must not abort the cascade — it is one tier's miss,
+    // A challenge on tier2 must not abort the cascade — it is one tier's miss,
     // not a verdict on the URL.
-    tier1Fetch.mockRejectedValue(challenge());
-    tier2Fetch.mockResolvedValue({
+    tier2Fetch.mockRejectedValue(challenge());
+    tier3Fetch.mockResolvedValue({
       title: "Real Article",
       url: URL,
       text: "real body",
@@ -251,7 +247,7 @@ describe("fetchPage — a detected challenge is a miss, not a hit", () => {
     expect(result.text).toBe("real body");
     expect(recordTierAttemptMock).toHaveBeenCalledWith(
       URL,
-      "tier2_crawl4ai",
+      "tier3_rawfetch",
       "hit",
     );
     expect(cacheSetMock).toHaveBeenCalledOnce();
@@ -259,13 +255,13 @@ describe("fetchPage — a detected challenge is a miss, not a hit", () => {
 
   it("leaves a non-challenge tier error recorded as an error", async () => {
     // Narrow change: only ChallengeDetectedError is reclassified.
-    tier1Fetch.mockRejectedValue(new Error("connection reset"));
+    tier2Fetch.mockRejectedValue(new Error("connection reset"));
 
     await expect(fetchPage(URL)).rejects.toThrow("All fetch tiers failed");
 
     expect(recordTierAttemptMock).toHaveBeenCalledWith(
       URL,
-      "tier1_firecrawl",
+      "tier2_crawl4ai",
       "error",
       "connection reset",
     );
@@ -275,12 +271,12 @@ describe("fetchPage — a detected challenge is a miss, not a hit", () => {
 describe("fetchPage — the solver gate", () => {
   it("NEVER invokes the solver on a normal URL that a tier serves", async () => {
     // End-to-end shape check for the common case. Note it does NOT by itself
-    // constrain the gate: tier1 succeeds here, so execution never reaches the
+    // constrain the gate: tier2 succeeds here, so execution never reaches the
     // solver dispatch point and this would pass even with the gate removed.
     // The test below is the one that actually holds the gate — it drives every
     // tier to miss, so the dispatch point IS reached and only the
     // challenge_detected condition keeps the solver out.
-    tier1Fetch.mockResolvedValue({ title: "t", url: URL, text: "body" });
+    tier2Fetch.mockResolvedValue({ title: "t", url: URL, text: "body" });
 
     await fetchPage(URL);
 
@@ -297,7 +293,6 @@ describe("fetchPage — the solver gate", () => {
     // challenge. Verified to go red when the `challengeDetected` condition is
     // removed. An ordinary miss is not a challenge — it goes straight to
     // wayback.
-    tier1Fetch.mockResolvedValue(null);
     tier2Fetch.mockRejectedValue(new Error("connection reset"));
     tier3Fetch.mockResolvedValue(null);
 
@@ -308,7 +303,7 @@ describe("fetchPage — the solver gate", () => {
   });
 
   it("invokes the solver once a tier reports a challenge", async () => {
-    tier1Fetch.mockRejectedValue(challenge());
+    tier2Fetch.mockRejectedValue(challenge());
     solverFetchMock.mockResolvedValue({
       title: "Solved Article",
       url: URL,
@@ -352,7 +347,7 @@ describe("fetchPage — the solver gate", () => {
   it("degrades cleanly into wayback when the solver fails to solve", async () => {
     // Byparr's own README states a bypass is not guaranteed, so a solver miss
     // is the expected path, not an error path.
-    tier1Fetch.mockRejectedValue(challenge());
+    tier2Fetch.mockRejectedValue(challenge());
     solverFetchMock.mockResolvedValue(null);
     waybackFetchMock.mockResolvedValue({
       title: "[Archived] Article",
@@ -369,12 +364,12 @@ describe("fetchPage — the solver gate", () => {
   it("does not let a challenge on one request arm the gate on the next", async () => {
     // The flag is a local in fetchPage, so it is request-scoped by
     // construction. This asserts that property rather than trusting it.
-    tier1Fetch.mockRejectedValueOnce(challenge());
+    tier2Fetch.mockRejectedValueOnce(challenge());
     await expect(fetchPage(URL)).rejects.toThrow("All fetch tiers failed");
     expect(solverFetchMock).toHaveBeenCalledOnce();
 
     solverFetchMock.mockClear();
-    tier1Fetch.mockResolvedValue({ title: "t", url: URL, text: "clean body" });
+    tier2Fetch.mockResolvedValue({ title: "t", url: URL, text: "clean body" });
     await fetchPage("https://other.example.com/page");
 
     expect(solverFetchMock).not.toHaveBeenCalled();

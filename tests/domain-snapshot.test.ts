@@ -31,13 +31,11 @@ function mkRecord(domain: string, lastFetch: string): DomainRecord {
     last_fetch: lastFetch,
     capabilities: {},
     tier_stats_30d: {
-      tier1: emptyStat(),
       tier2: emptyStat(),
       tier3: emptyStat(),
       tier4: emptyStat(),
       github: emptyStat(),
       solver: emptyStat(),
-      crawl: emptyStat(),
     },
   };
 }
@@ -257,7 +255,7 @@ describe("applyRestore", () => {
       domain: 42,
     };
     const nonNumericStat = mkRecord("bad-stat.com", "2026-06-01T00:00:00Z");
-    (nonNumericStat.tier_stats_30d.tier1 as Record<string, unknown>).attempts =
+    (nonNumericStat.tier_stats_30d.tier2 as Record<string, unknown>).attempts =
       "lots";
 
     const result = await applyRestore(client, [

@@ -158,42 +158,42 @@ describe("domains.ts — operator tier skips", () => {
 
   it("returns the tiers configured for a matching domain", async () => {
     const m = await loadWith({
-      tier_skip: { "slow.example": ["tier1", "tier2"] },
+      tier_skip: { "slow.example": ["tier2", "tier3"] },
     });
     expect(m.getOperatorTierSkips("https://slow.example/page").sort()).toEqual([
-      "tier1",
       "tier2",
+      "tier3",
     ]);
   });
 
   it("matches subdomains and www, like every other pattern in this file", async () => {
-    const m = await loadWith({ tier_skip: { "slow.example": ["tier1"] } });
+    const m = await loadWith({ tier_skip: { "slow.example": ["tier2"] } });
     expect(m.getOperatorTierSkips("https://cdn.slow.example/p")).toEqual([
-      "tier1",
+      "tier2",
     ]);
     expect(m.getOperatorTierSkips("https://www.slow.example/p")).toEqual([
-      "tier1",
+      "tier2",
     ]);
   });
 
   it("returns nothing for a non-matching URL", async () => {
-    const m = await loadWith({ tier_skip: { "slow.example": ["tier1"] } });
+    const m = await loadWith({ tier_skip: { "slow.example": ["tier2"] } });
     expect(m.getOperatorTierSkips("https://fast.example/p")).toEqual([]);
   });
 
   it("unions the tiers when several patterns match the same URL", async () => {
     const m = await loadWith({
-      tier_skip: { "slow.example": ["tier1"], "slow.example/heavy": ["tier2"] },
+      tier_skip: { "slow.example": ["tier2"], "slow.example/heavy": ["tier3"] },
     });
     expect(
       m.getOperatorTierSkips("https://slow.example/heavy/page").sort(),
-    ).toEqual(["tier1", "tier2"]);
+    ).toEqual(["tier2", "tier3"]);
     // De-duplicated, not concatenated.
     const m2 = await loadWith({
-      tier_skip: { "slow.example": ["tier1"], "slow.example/heavy": ["tier1"] },
+      tier_skip: { "slow.example": ["tier2"], "slow.example/heavy": ["tier2"] },
     });
     expect(m2.getOperatorTierSkips("https://slow.example/heavy/p")).toEqual([
-      "tier1",
+      "tier2",
     ]);
   });
 
@@ -201,9 +201,9 @@ describe("domains.ts — operator tier skips", () => {
     // tier_skip is operator-edited JSON, so a scalar where a list belongs is a
     // realistic typo. It must not take the fetch path down.
     const m = await loadWith({
-      tier_skip: { "a.example": "tier1", "b.example": ["tier2"] },
+      tier_skip: { "a.example": "tier2", "b.example": ["tier3"] },
     });
     expect(m.getOperatorTierSkips("https://a.example/p")).toEqual([]);
-    expect(m.getOperatorTierSkips("https://b.example/p")).toEqual(["tier2"]);
+    expect(m.getOperatorTierSkips("https://b.example/p")).toEqual(["tier3"]);
   });
 });

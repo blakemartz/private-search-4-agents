@@ -390,13 +390,11 @@ describe("handleDomainStats", () => {
       last_fetch: "2026-06-01T00:00:00Z",
       capabilities,
       tier_stats_30d: {
-        tier1: stat(0, 0, 0),
         tier2: stat(0, 0, 0),
         tier3: stat(0, 0, 0),
         tier4: stat(0, 0, 0),
         github: stat(0, 0, 0),
         solver: stat(0, 0, 0),
-        crawl: stat(0, 0, 0),
         ...tiers,
       },
     };
@@ -407,7 +405,7 @@ describe("handleDomainStats", () => {
       JSON.stringify(
         mkRecord(
           "docs.example.com",
-          { tier1: stat(10, 9, 1) },
+          { tier2: stat(10, 9, 1) },
           { seen_in_search: { count: 4, last_seen_at: "x" } },
         ),
       ),
@@ -421,7 +419,7 @@ describe("handleDomainStats", () => {
       aggregate: null,
     });
     expect(result.structuredContent.record?.domain).toBe("docs.example.com");
-    expect(result.structuredContent.record?.tiers.tier1.success_rate).toBe(0.9);
+    expect(result.structuredContent.record?.tiers.tier2.success_rate).toBe(0.9);
     expect(result.structuredContent.record?.capabilities.seen_in_search).toBe(
       4,
     );
@@ -449,7 +447,7 @@ describe("handleDomainStats", () => {
     const mget = vi
       .fn()
       .mockResolvedValueOnce([
-        JSON.stringify(mkRecord("good.com", { tier1: stat(10, 9, 1) })),
+        JSON.stringify(mkRecord("good.com", { tier2: stat(10, 9, 1) })),
         JSON.stringify(
           mkRecord("raw.githubusercontent.com", { github: stat(28, 0, 28) }),
         ),

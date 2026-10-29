@@ -5,17 +5,15 @@ export interface DomainProfile {
   block?: string[];
 }
 
-export type TierSlot = "tier1" | "tier2" | "tier3";
+export type TierSlot = "tier2" | "tier3";
 
 export interface DomainConfig {
   boost: string[];
   block: string[];
   llms_txt?: string[];
   tier_skip?: Record<string, TierSlot[]>;
-  // Per-domain adblock bypass. v1 only carries the schema slot — Firecrawl
-  // does not forward custom headers to the puppeteer-service, so the
-  // X-Disable-Adblock signaling described in the build plan can't be wired
-  // yet. Tracked in scope-creep.md.
+  // Per-domain adblock bypass. Schema slot only — the X-Disable-Adblock
+  // signaling described in the build plan is not wired yet.
   adblock_skip?: string[];
   profiles: Record<string, DomainProfile>;
 }
@@ -66,27 +64,6 @@ export interface SearxMeta {
 export interface SearxSearchResult {
   results: SearxResult[];
   meta: SearxMeta;
-}
-
-export interface FirecrawlScrapeResponse {
-  success: boolean;
-  data?: {
-    markdown?: string;
-    // Two spellings of one field: v2 returns `html`, v1 returns `rawHtml`,
-    // matching whichever was asked for in `formats`. See
-    // FirecrawlCapabilities.htmlFormat.
-    html?: string;
-    rawHtml?: string;
-    metadata?: {
-      title?: string;
-      sourceURL?: string;
-      // The *page's* HTTP status, distinct from the API envelope's. v2 reports
-      // it; the legacy v1 backend may omit it, so absence means "unknown", not
-      // "failed".
-      statusCode?: number;
-    };
-  };
-  error?: string;
 }
 
 export interface RerankResult {

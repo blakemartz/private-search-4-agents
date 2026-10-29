@@ -1,12 +1,12 @@
 // Content-type classification and rendering for non-HTML responses.
 //
-// Tier1 (Firecrawl) is asked for `formats: ["markdown","html"]`. Handed a JSON
-// body it has nothing to render, returns empty markdown, and runTier records
-// that as `empty_result` — which read as "Firecrawl is broken" when Firecrawl
-// was healthy and simply being asked the wrong question. The lifetime tier1
-// failure set was dominated by JSON and CDN endpoints: api.osv.dev,
-// registry.npmjs.org, cdn.jsdelivr.net, data.jsdelivr.com, api.codetabs.com,
-// api.allorigins.win, registry.terraform.io.
+// A rendering tier handed a JSON body has nothing to render, returns empty
+// markdown, and runTier records that as `empty_result` — which reads as "the
+// tier is broken" when it was healthy and simply asked the wrong question. The
+// lifetime failure set of the (since removed) Firecrawl tier was dominated by
+// JSON and CDN endpoints: api.osv.dev, registry.npmjs.org, cdn.jsdelivr.net,
+// data.jsdelivr.com, api.codetabs.com, api.allorigins.win,
+// registry.terraform.io.
 //
 // This is a routing gap, not a fetcher fault. Structured payloads want a raw
 // HTTP GET and a fenced block, not a headless browser.

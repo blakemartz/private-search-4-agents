@@ -50,13 +50,11 @@ describe("dump-domain CLI — present-domain case", () => {
         },
       },
       tier_stats_30d: {
-        tier1: stat(10, 9, 1),
         tier2: stat(2, 0, 2),
-        tier3: stat(0, 0, 0),
+        tier3: stat(10, 9, 1),
         tier4: stat(3, 2, 1),
         github: stat(5, 5, 0),
         solver: stat(5, 5, 0),
-        crawl: stat(5, 5, 0),
       },
     });
 
@@ -67,16 +65,14 @@ describe("dump-domain CLI — present-domain case", () => {
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain('"domain": "docs.example.com"');
     expect(output).toContain("tier stats (30d window)");
-    expect(output).toContain("tier1 (firecrawl)");
-    expect(output).toContain("90% ok (9/10)");
     expect(output).toContain("tier2 (crawl4ai)");
     // n=2 is below MIN_ATTEMPTS_FOR_RATE, so this renders as a count rather
     // than "0% ok (0/2)" — two failures and ten failures are not the same
     // finding, and a percentage presented them as though they were
-    // (vikunja#686). tier1 above keeps its rate at n=10.
+    // (vikunja#686). tier3 below keeps its rate at n=10.
     expect(output).toContain("insufficient data (0/2)");
     expect(output).not.toContain("0% ok (0/2)");
-    expect(output).toContain("tier3 (raw)");
+    expect(output).toMatch(/tier3 \(raw\)\s*: 90% ok \(9\/10\)/);
     expect(output).toContain("tier4 (wayback)");
     // n=3, likewise below the threshold.
     expect(output).toContain("insufficient data (2/3)");
@@ -99,13 +95,11 @@ describe("dump-domain CLI — present-domain case", () => {
       last_fetch: "2026-06-01T00:00:00Z",
       capabilities: {},
       tier_stats_30d: {
-        tier1: stat(10, 9, 1),
         tier2: stat(2, 0, 2),
         tier3: stat(0, 0, 0),
         tier4: stat(0, 0, 0),
         github: stat(0, 0, 0),
         solver: stat(0, 0, 0),
-        crawl: stat(0, 0, 0),
       },
     });
 
@@ -128,13 +122,11 @@ describe("dump-domain CLI — present-domain case", () => {
       last_fetch: "2026-06-01T00:00:00Z",
       capabilities: {},
       tier_stats_30d: {
-        tier1: { ...stat(3, 0, 3), last_fail_reason: "timeout" },
-        tier2: stat(0, 0, 0),
+        tier2: { ...stat(3, 0, 3), last_fail_reason: "timeout" },
         tier3: stat(0, 0, 0),
         tier4: stat(0, 0, 0),
         github: stat(0, 0, 0),
         solver: stat(0, 0, 0),
-        crawl: stat(0, 0, 0),
       },
     });
 

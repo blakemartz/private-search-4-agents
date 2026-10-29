@@ -153,44 +153,6 @@ export function searxAuthHeader(url: string): string | undefined {
  * iterates `SEARXNG_URLS`.
  */
 export const SEARXNG_URL = SEARXNG_URLS[0];
-export const FIRECRAWL_URL =
-  process.env.FIRECRAWL_URL ?? "http://localhost:3002";
-export const FIRECRAWL_API_KEY =
-  process.env.FIRECRAWL_API_KEY ?? "placeholder-local";
-
-/**
- * Which Firecrawl API the client speaks. The legacy firecrawl-simple backend
- * serves only `/v1`; upstream Firecrawl 2.x serves only `/v2`. Both are live on
- * forge at the same time during the firecrawl-upstream-2026-09 migration, so
- * this is a configuration axis rather than a one-off path fix.
- *
- * Defaults to `v1`: the live fetch path must not change on upgrade.
- *
- * Unrecognised values throw at import — which, for a server whose entrypoint
- * imports this module, is startup. A silent fallback here would rebuild exactly
- * the failure that hid vikunja#644 for the life of the feature: a wrong version
- * prefix 404s, `crawl_site` swallows it into the sitemap fallback, and a wholly
- * dead code path keeps returning healthy-looking manifests.
- */
-export type FirecrawlApiVersion = "v1" | "v2";
-
-const FIRECRAWL_API_VERSIONS: readonly string[] = ["v1", "v2"];
-
-function parseFirecrawlApiVersion(): FirecrawlApiVersion {
-  const raw = process.env.FIRECRAWL_API_VERSION;
-  if (raw === undefined || raw.trim() === "") return "v1";
-  const v = raw.trim().toLowerCase();
-  if (!FIRECRAWL_API_VERSIONS.includes(v)) {
-    throw new Error(
-      `Invalid FIRECRAWL_API_VERSION: ${JSON.stringify(raw)}. ` +
-        `Must be one of: ${FIRECRAWL_API_VERSIONS.join(", ")}.`,
-    );
-  }
-  return v as FirecrawlApiVersion;
-}
-
-export const FIRECRAWL_API_VERSION: FirecrawlApiVersion =
-  parseFirecrawlApiVersion();
 export const RERANKER_URL = process.env.RERANKER_URL ?? "http://localhost:8787";
 export const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 export const CACHE_URL =
@@ -293,19 +255,12 @@ export const HISTER_URL = process.env.HISTER_URL?.replace(/\/$/, "") ?? "";
 export const HISTER_TOKEN = process.env.HISTER_TOKEN ?? "";
 export const CRAWL4AI_URL = process.env.CRAWL4AI_URL ?? null;
 export const CRAWL4AI_API_TOKEN = process.env.CRAWL4AI_API_TOKEN;
-// Fetch-tier kill switches. Only SearXNG is genuinely required — tier 3 is an
-// in-process raw fetch + Readability, so a deployment with no Firecrawl and no
-// Crawl4AI still serves fetch_url. These switches let such a deployment say so,
-// and the tier is then skipped as `not_configured` rather than attempted and
-// missed (see computeTierSkips in routing.ts).
-//
-// They default to *true* and are read as `!== "false"`, matching
-// YOUTUBE_TRANSCRIPT_ENABLED / REDDIT_FASTPATH_ENABLED. Deliberately NOT
-// derived from whether FIRECRAWL_URL was explicitly set: it defaults to
-// http://localhost:3002, so an instance already running Firecrawl on the
-// default port without an env var would silently lose tier 1. An explicit
-// switch is behaviour-neutral by construction.
-export const FIRECRAWL_ENABLED = process.env.FIRECRAWL_ENABLED !== "false";
+// Fetch-tier kill switch. Only SearXNG is genuinely required — tier 3 is an
+// in-process raw fetch + Readability, so a deployment with no Crawl4AI still
+// serves fetch_url. The switch lets such a deployment say so, and the tier is
+// then skipped as `not_configured` rather than attempted and missed (see
+// computeTierSkips in routing.ts). Defaults to *true* and is read as
+// `!== "false"`, matching YOUTUBE_TRANSCRIPT_ENABLED / REDDIT_FASTPATH_ENABLED.
 export const CRAWL4AI_ENABLED = process.env.CRAWL4AI_ENABLED !== "false";
 /**
  * Effective per-tier availability, derived from the switches above and the URL
@@ -318,7 +273,6 @@ export const CRAWL4AI_ENABLED = process.env.CRAWL4AI_ENABLED !== "false";
  */
 export function tierConfigured(): Record<TierSlot, boolean> {
   return {
-    tier1: FIRECRAWL_ENABLED,
     tier2: CRAWL4AI_ENABLED && Boolean(CRAWL4AI_URL),
     tier3: true,
   };
@@ -425,25 +379,6 @@ export const CRAWL_BFS_MAX_DEPTH = parseInt(
   process.env.CRAWL_BFS_MAX_DEPTH ?? "3",
   10,
 );
-export const FIRECRAWL_CRAWL_POLL_INTERVAL_MS = parseInt(
-  process.env.FIRECRAWL_CRAWL_POLL_INTERVAL_MS ?? "2000",
-  10,
-);
-export const FIRECRAWL_CRAWL_MAX_WAIT_MS = parseInt(
-  process.env.FIRECRAWL_CRAWL_MAX_WAIT_MS ?? "120000",
-  10,
-);
-
-// How long a v2 scrape waits for the page to settle when wait_for_selector was
-// requested. Under v2 there is no selector-based wait available — `actions` is
-// Fire-engine only — so the selector is downgraded to this fixed delay. Bounded
-// well under the tier's own 15 s AbortSignal so the wait can never be the thing
-// that times the request out. Unused under v1, which sends a real wait action.
-export const FIRECRAWL_WAIT_FOR_MS = positiveIntEnv(
-  "FIRECRAWL_WAIT_FOR_MS",
-  2000,
-);
-
 export const RERANK_RECENCY_WEIGHT = (() => {
   const v = parseFloat(process.env.RERANK_RECENCY_WEIGHT ?? "0.15");
   if (Number.isNaN(v) || v < 0) {

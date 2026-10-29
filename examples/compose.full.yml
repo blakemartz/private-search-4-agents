@@ -1,35 +1,31 @@
 # ── RUNG 4 of 4 — full ────────────────────────────────────────────────────────
 #
-# EVERYTHING. Rung 3 plus Firecrawl (with its own Redis and an adblocking
-# renderer), an adblock proxy for tiers 2-3, Ollama, Kiwix and NATS.
+# EVERYTHING. Rung 3 plus an adblock proxy for tiers 2-3, Ollama, Kiwix and
+# NATS.
 #
-#   Containers   12
-#   RAM          ~24 GB total — Ollama alone is capped at 8g and wants more
+#   Containers   9
+#   RAM          ~20 GB total — Ollama alone is capped at 8g and wants more
 #   GPU          optional, but you want one for Ollama (see the deploy: block)
 #   Disk         ~20 GB of images, plus models and any ZIM corpus you download
 #
 # THIS RUNG IS NOT A RECOMMENDATION. It is the reference topology — the one that
 # proves every tier and fast path works together. Most adopters should stop at
-# rung 2 or 3. Run this if you want PDFs, LLM summarisation, offline Wikipedia,
+# rung 2 or 3. Run this if you want LLM summarisation, offline Wikipedia,
 # or you are developing against the fetch cascade itself.
 #
 # WHAT CHANGES FROM RUNG 3
 #   `search_and_summarize`   now works — Ollama synthesises a cited summary.
 #                            Below rung 4 it returns fetched pages behind an
 #                            explicit `summarization unavailable` marker.
-#   PDFs                     now fetchable — Firecrawl v2 serves them; no other
-#                            tier does
-#   `crawl_site`             now uses Firecrawl's real crawl, not the sitemap/BFS
-#                            fallback
 #   Wikipedia / Stack Overflow / Arch Wiki
 #                            served locally from Kiwix, before the cascade runs
-#   ad and tracker filtering both on tier 1 (in-renderer) and tiers 2-3 (proxy)
+#   ad and tracker filtering on tiers 2-3 (proxy)
 #   Wayback                  tier-4 archived-snapshot fallback, enabled here
 #   NATS                     a JetStream event per search and fetch
 #
 # THE CAPABILITY LINE THIS RUNG PRINTS — measured 2026-09-07:
 #
-#   capabilities on=tier3,wayback unverified=tier1,tier2,cache,reranker,llm,kiwix,nats \
+#   capabilities on=tier3,wayback unverified=tier2,cache,reranker,llm,kiwix,nats \
 #     off=hister,solver,otel
 #
 # `hister` and `solver` are off because both are separate services this file does
@@ -55,11 +51,10 @@
 #   fetch-net      adblock-proxy + crawl4ai + searxng-mcp — the proxy is an open
 #                  forward proxy with no auth, and must not be reachable from
 #                  anything that does not need it
-#   firecrawl-net  firecrawl-api + firecrawl-redis + firecrawl-playwright + searxng-mcp
 #   (default)      searxng, cache, ollama, reranker, kiwix, nats, searxng-mcp
 #
-# searxng-mcp is the only service on all three, because it is the only one that
-# has to talk to every tier.
+# searxng-mcp is the only service on both, because it is the only one that has
+# to talk to every tier.
 
 # See rung 1's note: shared project name is deliberate (vikunja#694).
 name: searxng-mcp
@@ -81,8 +76,8 @@ services:
     # `GET /` 200, and `?format=json` 200.
     #
     # An earlier draft of this file granted SETUID and SETGID here, reasoning by
-    # analogy from `cache` and `firecrawl-redis` (whose entrypoints DO drop
-    # privileges with setpriv and do need them). SearXNG's does not, and the
+    # analogy from `cache` (whose entrypoint DOES drop privileges with
+    # setpriv and does need them). SearXNG's does not, and the
     # comment asserted a verification that had never been run. Two capabilities
     # were being handed to an adopter's container for no reason.
     #
@@ -129,94 +124,11 @@ services:
     ulimits:
       memlock: -1
 
-  # ── Firecrawl (tier-1 JS-render fetch) ──────────────────────────────────────
-  # Firecrawl requires its own Redis instance and the playwright-service sidecar.
-  # See https://docs.firecrawl.dev/self-hosting for full setup.
-  firecrawl-api:
-    image: ghcr.io/mendableai/firecrawl:latest # SECURITY[accepted]: latest tag — example file; pin for production
-    restart: unless-stopped
-    # No `user:`: image not available here to confirm its default user, so this
-    # is UNVERIFIED rather than assumed safe — flagged for audit.
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    # No `read_only`: NOT verified. This image is not published under a tag
-    # that could be started without API keys, so it was never run under the
-    # hardening. Absent rather than guessed — see the note at the top.
-    mem_limit: 2g
-    cpus: 2.0
-    environment:
-      REDIS_URL: redis://firecrawl-redis:6379
-      PLAYWRIGHT_MICROSERVICE_URL: http://firecrawl-playwright:3003
-      USE_DB_AUTHENTICATION: "false"
-    ports:
-      - "127.0.0.1:3002:3002"
-    depends_on:
-      - firecrawl-redis
-      - firecrawl-playwright
-    networks:
-      - firecrawl-net
-
-  firecrawl-redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    # redis:7-alpine drops privileges with setpriv, exactly like Dragonfly, so
-    # a bare `cap_drop: [ALL]` restart-loops it on
-    # "setpriv: setresuid failed: Operation not permitted".
-    #
-    # This was initially recorded as verified against `redis:alpine` — a
-    # DIFFERENT image (redis 8, different entrypoint) that happens to be the
-    # one present on the build host. It passed, and the tag this file actually
-    # declares did not. Every probe below is now run against the exact
-    # reference in this file.
-    # As with `cache`: running as uid 1000 means the setpriv drop is not
-    # attempted, so SETUID/SETGID are not needed. Verified both ways.
-    user: "1000:1000"
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    read_only: true
-    mem_limit: 512m
-    cpus: 1.0
-    networks:
-      - firecrawl-net
-
-  firecrawl-playwright:
-    # Custom build: ghcr.io/firecrawl/playwright-service + EasyList/EasyPrivacy
-    # via @ghostery/adblocker-playwright. See docker/playwright-adblock/README.md
-    # — and read its SSRF note before changing the route handler.
-    #
-    # Replaces the former puppeteer-based service, which layered adblocking onto
-    # the v1 renderer (trieve/puppeteer-service-ts). This repo defaults to
-    # FIRECRAWL_API_VERSION=v2, whose renderer is the playwright service — so
-    # tier-1 adblocking did not apply to the configuration this project actually
-    # runs (vikunja#696). docker/puppeteer-adblock/ is kept for adopters still on
-    # v1 and is marked v1-only in its README.
-    #
-    # NOTE: the port is 3003, not 3000 — the two renderers differ.
-    build:
-      context: ../docker/playwright-adblock
-    restart: unless-stopped
-    # No `user:`: the base image already runs as `node` (non-root). Overriding
-    # it with a guessed uid risks breaking file ownership inside the image.
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    # No `read_only`: not verified — Chromium writes outside /tmp. Left off
-    # rather than guessed.
-    mem_limit: 2g
-    cpus: 2.0
-    environment:
-      # ADBLOCK_FILTERS_URL is deliberately unset: the filter lists are baked
-      # into the image, and setting this opts back into fetching them at
-      # runtime — the switch defeated by its own default.
-      # Set ADBLOCK_DISABLE=true to disable adblocking for debugging.
-      ADBLOCK_DISABLE: "${ADBLOCK_DISABLE:-false}"
-    networks:
-      - firecrawl-net
-
   # ── Adblock proxy (tiers 2+3 HTTP proxy filter) ────────────────────────────
   # Routes Crawl4AI and raw Node fetch through a @ghostery/adblocker HTTP proxy.
   # Plain-HTTP ad/tracker requests are blocked with an empty 200 response.
   # HTTPS CONNECT is tunneled without MITM — see docker/adblock-proxy/README.md.
-  # On fetch-net only — unreachable from firecrawl, ollama, reranker, kiwix, nats.
+  # On fetch-net only — unreachable from ollama, reranker, kiwix, nats.
   # Port 8118 exposed to host so searxng-mcp (PM2/host process) can reach it.
   adblock-proxy:
     image: ghcr.io/tadmstr/searxng-mcp-adblock-proxy:latest # SECURITY[accepted]: latest tag — example file; pin for production
@@ -398,20 +310,18 @@ services:
       - cache
       - crawl4ai
       - reranker
-      - firecrawl-api
       - ollama
     ports:
       # Loopback only — see rung 1. Remove the 127.0.0.1 prefix and
       # SEARXNG_MCP_AUTH_TOKEN stops being optional. At this rung the server can
-      # reach Ollama, Firecrawl and an open forward proxy, so an unauthenticated
+      # reach Ollama and an open forward proxy, so an unauthenticated
       # port here is worth considerably more to an attacker than at rung 1.
       - "127.0.0.1:3001:3001"
-    # The only service on all three networks: it is the only one that has to
+    # The only service on both networks: it is the only one that has to
     # reach every tier. See the isolation note in the header.
     networks:
       - default
       - fetch-net
-      - firecrawl-net
     environment:
       SEARXNG_URL: http://searxng:8080
       SEARXNG_MCP_AUTH_TOKEN: "${SEARXNG_MCP_AUTH_TOKEN:-}"
@@ -420,21 +330,6 @@ services:
       RERANKER_URL: http://reranker:8787
       CRAWL4AI_URL: http://crawl4ai:11235
       CRAWL4AI_API_TOKEN: "${CRAWL4AI_API_TOKEN:-}"
-
-      # ── Firecrawl — tier 1 ─────────────────────────────────────────────────
-      FIRECRAWL_URL: http://firecrawl-api:3002
-      FIRECRAWL_API_KEY: "${FIRECRAWL_API_KEY:-placeholder-local}"
-      # SET EXPLICITLY, and it matters. FIRECRAWL_API_VERSION defaults to `v1`
-      # in src/config.ts — deliberately, so an upgrade never silently changes
-      # the live fetch path. But the renderer wired into this file is
-      # firecrawl-playwright, which is the *v2* renderer, and the adblocking it
-      # provides applies only on v2 (vikunja#696).
-      #
-      # Leave this unset and you get the v1 client talking to a v2 topology:
-      # tier-1 adblocking silently does nothing, and PDFs (a v2-only capability)
-      # do not work. The file must state the version it is actually built for
-      # rather than relying on a default that points the other way.
-      FIRECRAWL_API_VERSION: v2
 
       # ── Adblock proxy — tiers 2 and 3 ──────────────────────────────────────
       ADBLOCK_PROXY_URL: http://adblock-proxy:8118
@@ -463,7 +358,6 @@ services:
 
 networks:
   fetch-net:
-  firecrawl-net:
 
 volumes:
   ollama-data:
@@ -500,9 +394,6 @@ volumes:
 #
 #   SEARXNG_URL             http://localhost:8081
 #   CACHE_URL               redis://localhost:6381
-#   FIRECRAWL_URL           http://localhost:3002
-#   FIRECRAWL_API_VERSION   v2
-#   FIRECRAWL_API_KEY       placeholder-local
 #   CRAWL4AI_URL            http://localhost:11235
 #   CRAWL4AI_API_TOKEN      <same value as above>
 #   RERANKER_URL            http://localhost:8787

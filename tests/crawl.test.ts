@@ -41,12 +41,8 @@ vi.mock("../src/config.js", async () => {
     );
   return {
     ...actual,
-    FIRECRAWL_URL: "http://localhost:3002",
-    FIRECRAWL_API_KEY: "test-key",
     CRAWL_BFS_ENABLED: false,
     CRAWL_BFS_MAX_DEPTH: 2,
-    FIRECRAWL_CRAWL_POLL_INTERVAL_MS: 50,
-    FIRECRAWL_CRAWL_MAX_WAIT_MS: 500,
     CRAWL_MANIFEST_TTL_SECONDS: 21600,
     FETCH_CACHE_TTL_SECONDS: 86400,
   };
@@ -372,7 +368,7 @@ function mockSitemapSite(locs: string[]) {
           { status: 200, headers: { "Content-Type": "text/xml" } },
         );
       }
-      // robots.txt, Firecrawl and everything else: absent.
+      // robots.txt and everything else: absent.
       return new Response("", { status: 404 });
     },
   );

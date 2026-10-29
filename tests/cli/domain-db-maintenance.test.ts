@@ -36,13 +36,11 @@ function recordJson(
     last_fetch: "2026-06-01T00:00:00Z",
     capabilities: {},
     tier_stats_30d: {
-      tier1: stat(0, 0, 0),
       tier2: stat(0, 0, 0),
       tier3: stat(0, 0, 0),
       tier4: stat(0, 0, 0),
       github: stat(0, 0, 0),
       solver: stat(0, 0, 0),
-      crawl: stat(0, 0, 0),
       ...tiers,
     },
   });
@@ -61,25 +59,22 @@ describe("deriveGauges", () => {
       top_failing: [],
       truncated: false,
       tiers: {
-        tier1: tierAgg(10, 9, 0.9),
-        tier2: tierAgg(0, 0, null),
+        tier2: tierAgg(10, 9, 0.9),
         tier3: tierAgg(4, 1, 0.25),
         tier4: tierAgg(0, 0, null),
         github: tierAgg(28, 0, 0),
         solver: tierAgg(2, 1, 0.5),
-        crawl: tierAgg(2, 1, 0.5),
       },
     };
     const g = deriveGauges(agg);
     expect(g.domains_tracked).toBe(12);
     expect(g.domains_failing).toBe(4);
-    // tier2/tier4 (null ratio) are omitted; the rest are present.
+    // tier4 (null ratio) is omitted; the rest are present.
     expect(g.tier_success_ratio).toEqual([
-      { tier: "tier1", ratio: 0.9 },
+      { tier: "tier2", ratio: 0.9 },
       { tier: "tier3", ratio: 0.25 },
       { tier: "github", ratio: 0 },
       { tier: "solver", ratio: 0.5 },
-      { tier: "crawl", ratio: 0.5 },
     ]);
   });
 });
@@ -127,7 +122,7 @@ describe("runMaintenance", () => {
     const mget = vi
       .fn()
       .mockResolvedValueOnce([
-        recordJson("good.com", { tier1: stat(10, 9, 1) }),
+        recordJson("good.com", { tier2: stat(10, 9, 1) }),
         recordJson("raw.githubusercontent.com", { github: stat(28, 0, 28) }),
       ]);
     getValkeyMock.mockResolvedValue({ scan, mget } as unknown as NonNullable<

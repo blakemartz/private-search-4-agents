@@ -15,7 +15,6 @@ const CONFIG_ENV = [
   "HTTP_SESSION_IDLE_TIMEOUT_MS",
   "HTTP_MAX_SESSIONS",
   "SEARXNG_MCP_AUTH_TOKEN",
-  "FIRECRAWL_ENABLED",
   "CRAWL4AI_ENABLED",
   "CRAWL4AI_URL",
   "OLLAMA_SUMMARIZE_TIMEOUT_MS",
@@ -262,47 +261,44 @@ describe("isLoopbackHost", () => {
   });
 });
 
-describe("fetch-tier kill switches", () => {
-  it("both default to enabled when unset", async () => {
-    const { FIRECRAWL_ENABLED, CRAWL4AI_ENABLED } = await import(
-      "../src/config.js"
-    );
-    expect(FIRECRAWL_ENABLED).toBe(true);
+describe("fetch-tier kill switch", () => {
+  it("defaults to enabled when unset", async () => {
+    const { CRAWL4AI_ENABLED } = await import("../src/config.js");
     expect(CRAWL4AI_ENABLED).toBe(true);
   });
 
   // The `!== "false"` convention shared with YOUTUBE_TRANSCRIPT_ENABLED and
   // REDDIT_FASTPATH_ENABLED: only the exact string disables, so a typo or a
   // "0" leaves the tier on rather than silently killing it.
-  it('only the exact string "false" disables them', async () => {
-    process.env.FIRECRAWL_ENABLED = "false";
+  it('only the exact string "false" disables it', async () => {
+    process.env.CRAWL4AI_ENABLED = "false";
+    const { CRAWL4AI_ENABLED } = await import("../src/config.js");
+    expect(CRAWL4AI_ENABLED).toBe(false);
+  });
+
+  it('a differently-cased "False" does not disable it', async () => {
     process.env.CRAWL4AI_ENABLED = "False";
-    const { FIRECRAWL_ENABLED, CRAWL4AI_ENABLED } = await import(
-      "../src/config.js"
-    );
-    expect(FIRECRAWL_ENABLED).toBe(false);
+    const { CRAWL4AI_ENABLED } = await import("../src/config.js");
     expect(CRAWL4AI_ENABLED).toBe(true);
   });
 
-  it("neither 0 nor an empty string disables them", async () => {
-    process.env.FIRECRAWL_ENABLED = "0";
+  it("neither 0 nor an empty string disables it", async () => {
+    process.env.CRAWL4AI_ENABLED = "0";
+    const first = await import("../src/config.js");
+    expect(first.CRAWL4AI_ENABLED).toBe(true);
+    vi.resetModules();
     process.env.CRAWL4AI_ENABLED = "";
-    const { FIRECRAWL_ENABLED, CRAWL4AI_ENABLED } = await import(
-      "../src/config.js"
-    );
-    expect(FIRECRAWL_ENABLED).toBe(true);
-    expect(CRAWL4AI_ENABLED).toBe(true);
+    const second = await import("../src/config.js");
+    expect(second.CRAWL4AI_ENABLED).toBe(true);
   });
 });
 
 describe("tierConfigured", () => {
   // Tier 2 needs a URL as well as its switch: CRAWL4AI_URL has no default, so
-  // the switch alone cannot make the tier callable. Tier 1 differs because
-  // FIRECRAWL_URL defaults to http://localhost:3002.
+  // the switch alone cannot make the tier callable.
   it("reports tier2 unconfigured when CRAWL4AI_URL is unset", async () => {
     const { tierConfigured } = await import("../src/config.js");
     expect(tierConfigured()).toEqual({
-      tier1: true,
       tier2: false,
       tier3: true,
     });
@@ -321,16 +317,9 @@ describe("tierConfigured", () => {
     expect(tierConfigured().tier2).toBe(false);
   });
 
-  it("reports tier1 unconfigured when Firecrawl is switched off", async () => {
-    process.env.FIRECRAWL_ENABLED = "false";
-    const { tierConfigured } = await import("../src/config.js");
-    expect(tierConfigured().tier1).toBe(false);
-  });
-
   // Tier 3 is in-process, so no configuration can turn it off. This is what
   // makes SearXNG the only genuine prerequisite.
   it("always reports tier3 configured, whatever else is off", async () => {
-    process.env.FIRECRAWL_ENABLED = "false";
     process.env.CRAWL4AI_ENABLED = "false";
     const { tierConfigured } = await import("../src/config.js");
     expect(tierConfigured().tier3).toBe(true);

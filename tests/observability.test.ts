@@ -38,7 +38,7 @@ describe("observability — no-op mode (OTEL_EXPORTER_OTLP_ENDPOINT unset)", () 
   it("incCounter and recordHistogram do not throw when no meter is set", () => {
     expect(() => incCounter("search", { profile: "x" })).not.toThrow();
     expect(() =>
-      recordHistogram("fetch", 0.5, { tier: "tier1_firecrawl" }),
+      recordHistogram("fetch", 0.5, { tier: "tier2_crawl4ai" }),
     ).not.toThrow();
   });
 

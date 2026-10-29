@@ -1,24 +1,16 @@
 // The pure, caller-facing functions in crawl.ts: the manifest renderer and the
-// two URL extractors.
+// sitemap URL extractor.
 //
 // These sit at the boundary where a crawl result becomes text an agent reads,
-// or where a third party's XML/JSON becomes a list of URLs we will fetch. Both
+// or where a third party's XML becomes a list of URLs we will fetch. Both
 // are total by contract — a malformed sitemap is a fact about the sitemap, not
 // an error — so the interesting cases are all degenerate inputs.
 import { describe, expect, it } from "vitest";
 import {
   type CrawlManifest,
-  extractMapUrls,
   extractSitemapUrls,
   formatCrawlManifest,
 } from "../src/crawl.js";
-
-// extractMapUrls is defensive about link shapes because Firecrawl's /map
-// response is third-party JSON — the wrong-shaped inputs below are the reason
-// those guards exist, so they are typed loosely on purpose rather than cast at
-// each call site.
-type LooseMapResponse = Parameters<typeof extractMapUrls>[0];
-const loose = (v: unknown) => v as LooseMapResponse;
 
 const page = (url: string, title = "T", snippet = "S") => ({
   url,
@@ -149,38 +141,5 @@ describe("extractSitemapUrls", () => {
     ]) {
       expect(extractSitemapUrls(xml), JSON.stringify(xml)).toEqual([]);
     }
-  });
-});
-
-describe("extractMapUrls", () => {
-  it("accepts both the bare-string and {url} link shapes", () => {
-    expect(
-      extractMapUrls({
-        links: ["https://e.com/a", { url: "https://e.com/b" }],
-      }),
-    ).toEqual(["https://e.com/a", "https://e.com/b"]);
-  });
-
-  it("returns [] when links is absent or not an array", () => {
-    expect(extractMapUrls({})).toEqual([]);
-    expect(extractMapUrls(loose({ links: "https://e.com/a" }))).toEqual([]);
-    expect(extractMapUrls(loose({ links: null }))).toEqual([]);
-  });
-
-  it("skips nulls, wrong-typed entries and non-http URLs", () => {
-    expect(
-      extractMapUrls(
-        loose({
-          links: [
-            null,
-            42,
-            { nope: 1 },
-            { url: 7 },
-            "ftp://e.com/x",
-            "https://e.com/ok",
-          ],
-        }),
-      ),
-    ).toEqual(["https://e.com/ok"]);
   });
 });

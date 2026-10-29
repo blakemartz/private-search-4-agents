@@ -116,17 +116,16 @@ const NET_ERROR = /net::ERR_[A-Z_]+/;
 /**
  * Turn a crawl4ai error response body into one bounded, single-line reason.
  *
- * Relaying upstream prose at all is a deliberate choice with a precedent: the
- * same decision was taken for Firecrawl's `data.error` and accepted at audit
+ * Relaying upstream prose at all is a deliberate choice, accepted at audit
  * (OE-02, 2026-09-06) on the grounds that this server is loopback-only and its
  * callers already hold the URL they asked for. The alternative — a canned
  * reason — is what made vikunja#690 invisible for weeks.
  */
 // SECURITY[accepted]: relaying Crawl4AI's upstream `detail` / `error` /
 // `correlation_id` is accepted rather than classified down to a canned reason.
-// Filed as its OWN accepted-risks.md row rather than inheriting the Firecrawl
-// one in src/fetch.ts: that row names "Firecrawl's upstream data.error" and is
-// scoped to that relay, and per SC-23 a new relay source gets its own row. Same
+// Filed as its OWN accepted-risks.md row rather than inheriting the (since
+// removed) Firecrawl one: that row named "Firecrawl's upstream data.error" and
+// was scoped to that relay, and per SC-23 a new relay source gets its own row. Same
 // trust model — this server is loopback-only and its callers already hold the
 // URL they asked for, so the text discloses nothing they do not have. The
 // diagnostic value is the entire point: a canned reason is what let a 100% tier

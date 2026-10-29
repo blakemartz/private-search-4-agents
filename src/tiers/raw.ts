@@ -2,7 +2,7 @@ import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 import { ProxyAgent } from "undici";
 import { ChallengeDetectedError, detectChallenge } from "../challenge.js";
-import { ADBLOCK_PROXY_URL, FIRECRAWL_API_VERSION } from "../config.js";
+import { ADBLOCK_PROXY_URL } from "../config.js";
 import {
   classifyContentType,
   looksLikeHtml,
@@ -15,7 +15,6 @@ import {
   type TierResult,
   USER_AGENT,
 } from "../fetch-utils.js";
-import { firecrawlSupportsPdf } from "../firecrawl-api.js";
 import { warnDependencyFailure } from "../transport-failure.js";
 
 // Create a ProxyAgent once at module init when ADBLOCK_PROXY_URL is configured.
@@ -91,18 +90,14 @@ export async function rawFetch(
   // as a PDF is still booked as `challenge_detected` and can reach the solver.
   //
   // The message names the actual cause. It used to read "use Crawl4AI", which
-  // was wrong twice over: Crawl4AI cannot parse PDFs either, and reaching here
-  // at all means tier 1 already declined. Under v2 that is a real tier-1
-  // failure worth investigating; under v1 the backend simply has no PDF support
-  // and no amount of config will change it (vikunja#682).
+  // was wrong: Crawl4AI cannot parse PDFs either, and no tier in this build
+  // does, so no amount of config will change it (vikunja#682).
   if (
     res.headers.get("content-type")?.includes("application/pdf") &&
     body.startsWith("%PDF-")
   ) {
     throw new Error(
-      firecrawlSupportsPdf()
-        ? "PDF content cannot be extracted by raw fetch — tier 1 (Firecrawl) handles PDFs but returned nothing for this URL"
-        : `PDF content cannot be extracted by raw fetch — FIRECRAWL_API_VERSION is ${FIRECRAWL_API_VERSION}, which has no PDF support; v2 does`,
+      "PDF content cannot be extracted — no tier in this build parses PDF text",
     );
   }
 

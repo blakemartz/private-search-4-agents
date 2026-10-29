@@ -40,7 +40,6 @@ import { logInfo } from "./log.js";
 export function capabilities(): Record<string, boolean> {
   const tiers = tierConfigured();
   return {
-    tier1: tiers.tier1,
     tier2: tiers.tier2,
     tier3: tiers.tier3,
     cache: Boolean(CACHE_URL),

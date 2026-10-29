@@ -213,7 +213,7 @@ async function fetchApiUrl(
     apiHeaders(),
     "GitHub API error",
   );
-  // Bounded read before JSON.parse — same pattern as tiers/firecrawl.ts.
+  // Bounded read before JSON.parse.
   // res.json() has no size limit of its own.
   const data = JSON.parse(await readBoundedText(res)) as Record<
     string,

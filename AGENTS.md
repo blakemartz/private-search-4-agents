@@ -1,6 +1,6 @@
 # AGENTS.md — searxng-mcp
 
-MCP server for private web search via a self-hosted SearXNG instance. Reranks results with a local ML model, fetches full-page content via a four-tier cascade (Firecrawl → Crawl4AI → raw HTTP → Wayback Machine opt-in), and optionally expands queries and synthesizes summaries via Ollama.
+MCP server for private web search via a self-hosted SearXNG instance. Reranks results with a local ML model, fetches full-page content via a fetch cascade (fast paths → Crawl4AI → raw HTTP → solver and Wayback Machine, both opt-in), and optionally expands queries and synthesizes summaries via Ollama.
 
 ## What it does
 
@@ -10,7 +10,7 @@ Exposes seven MCP tools:
 - **`search_and_fetch`** — same as `search` but also fetches full content of the top result(s) via the fetch cascade
 - **`search_and_summarize`** — search, fetch, then synthesize a summary with citations via Ollama (default `qwen3:14b`, override with `OLLAMA_SUMMARIZE_MODEL`). If the LLM is unavailable it degrades to raw fetched pages, and says so: the payload leads with a `--- summarization unavailable (<kind>: <detail>) ---` marker. Absence of that marker means you got a real synthesis.
 - **`fetch_url`** — fetch and extract readable markdown from any public URL; GitHub URLs use the GitHub API, YouTube/Reddit URLs have opt-in fast paths; optional `target_selector`/`wait_for_selector` and `max_tokens` budget
-- **`crawl_site`** — crawl a site and return a page manifest (Firecrawl → sitemap → optional BFS); content cached for follow-up `fetch_url`
+- **`crawl_site`** — crawl a site and return a page manifest (sitemap → optional BFS, scoped to the start URL's path); content cached for follow-up `fetch_url`
 - **`clear_cache`** — purge the Valkey result cache (search, fetch, crawl, or all)
 - **`domain_stats`** — read-only view of the domain capability database (single-domain or aggregate) with MCP structured output
 
@@ -28,9 +28,9 @@ src/
   youtube.ts      # YouTube transcript fast path (timedtext; opt-in via robots)
   reddit.ts       # Reddit .json fast path (post + top comments; opt-in via robots)
   tiers/          # Tier handlers (one file per tier)
-    firecrawl.ts  # Tier 1: Firecrawl JS-rendering scrape
-    crawl4ai.ts   # Tier 2: Crawl4AI headless fetch + Readability comparison
+    crawl4ai.ts   # Tier 2: Crawl4AI headless fetch + Readability comparison (no tier 1; slot names kept)
     raw.ts        # Tier 3: raw HTTP + Readability; fetchRawHtmlForMetadata for post-extract
+    solver.ts     # Challenge solver (Byparr/FlareSolverr), reached only on a detected challenge (opt-in, SOLVER_ENABLED)
     wayback.ts    # Tier 4: Wayback Machine CDX lookup + rawFetch (opt-in, WAYBACK_ENABLED)
     github.ts     # GitHub fast path: README, blob, tree, releases (API); other github.com pages take the cascade
     index.ts      # Barrel re-export
@@ -60,14 +60,13 @@ Required services:
 | Service | Env var | Purpose |
 |---|---|---|
 | SearXNG | `SEARXNG_URL` | Meta-search engine |
-| Firecrawl | `FIRECRAWL_URL` | JS-aware page scraping (tier 1) |
 
 Optional services (server degrades gracefully without these):
 
 | Service | Env var | Purpose |
 |---|---|---|
 | Reranker | `RERANKER_URL` | ML relevance reranking |
-| Crawl4AI | `CRAWL4AI_URL` | Fetch fallback for bot-blocked pages (tier 2) |
+| Crawl4AI | `CRAWL4AI_URL` | JS-rendering fetch, first tier of the cascade (tier 2); recommended |
 | Valkey/Redis/Dragonfly | `CACHE_URL` | Result caching (also accepts `VALKEY_URL` or `REDIS_URL`) |
 | Ollama | `OLLAMA_URL` | Query expansion + summarization |
 | Wayback Machine | `WAYBACK_ENABLED=true` | Archived snapshot fallback (tier 4, opt-in) |
@@ -109,7 +108,7 @@ pnpm test         # vitest run --typecheck
 
 ## URL safety
 
-All outbound fetches to caller-influenced or discovered URLs go through `safeFetch` (`fetch-utils.ts`): a string-level guard (`assertPublicUrl` — private/internal IP literals + non-HTTP) plus a DNS-validating undici dispatcher (`ssrf-guard.ts`) that rejects any hostname resolving to a private/reserved address at connect time, re-checked on every redirect hop (closes DNS-rebinding/TOCTOU). Configured internal services are intentionally not guarded, because their base URL comes from the environment rather than from a caller: Firecrawl, Crawl4AI, SearXNG, Ollama, the reranker, **Kiwix, Hister and the solver**. The last three were missing from this list while using unguarded `fetch` exactly like the other five — so a reader auditing `hister.ts` or `kiwix.ts` against this paragraph found an undocumented unguarded fetch, which invites either a false finding or a "fix" that routes an internal service through a guard designed to reject internal addresses. Corrected 2026-09-20. The set is every module whose fetch target originates in the environment — directly from a `config.ts` constant, or via a helper that builds one (`firecrawlEndpoint()` reads `FIRECRAWL_URL`; `getSearxCandidates()` reads `SEARXNG_URLS`). Anything whose target derives from a *caller's* URL goes through `safeFetch`, which is why `llms-txt.ts`, `robots.ts`, `youtube.ts`, `reddit.ts`, `github.ts`, `raw.ts` and `wayback.ts` all use it.
+All outbound fetches to caller-influenced or discovered URLs go through `safeFetch` (`fetch-utils.ts`): a string-level guard (`assertPublicUrl` — private/internal IP literals + non-HTTP) plus a DNS-validating undici dispatcher (`ssrf-guard.ts`) that rejects any hostname resolving to a private/reserved address at connect time, re-checked on every redirect hop (closes DNS-rebinding/TOCTOU). Configured internal services are intentionally not guarded, because their base URL comes from the environment rather than from a caller: Crawl4AI, SearXNG, Ollama, the reranker, **Kiwix, Hister and the solver**. The last three were missing from this list while using unguarded `fetch` exactly like the other four — so a reader auditing `hister.ts` or `kiwix.ts` against this paragraph found an undocumented unguarded fetch, which invites either a false finding or a "fix" that routes an internal service through a guard designed to reject internal addresses. Corrected 2026-09-20. The set is every module whose fetch target originates in the environment — directly from a `config.ts` constant, or via a helper that builds one (`getSearxCandidates()` reads `SEARXNG_URLS`). Anything whose target derives from a *caller's* URL goes through `safeFetch`, which is why `llms-txt.ts`, `robots.ts`, `youtube.ts`, `reddit.ts`, `github.ts`, `raw.ts` and `wayback.ts` all use it.
 
 Do not remove these checks — they prevent SSRF against internal services.
 

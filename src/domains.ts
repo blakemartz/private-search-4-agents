@@ -30,6 +30,11 @@ export function getLlmsTxtAllowlist(): string[] {
   return domainConfig.llms_txt ?? [];
 }
 
+const CASCADE_SLOTS: ReadonlySet<string> = new Set<TierSlot>([
+  "tier2",
+  "tier3",
+]);
+
 export function getOperatorTierSkips(url: string): TierSlot[] {
   const overrides = domainConfig.tier_skip;
   if (!overrides) return [];
@@ -37,7 +42,10 @@ export function getOperatorTierSkips(url: string): TierSlot[] {
   for (const [pattern, tiers] of Object.entries(overrides)) {
     if (!Array.isArray(tiers)) continue;
     if (urlMatchesDomain(url, pattern)) {
-      for (const t of tiers) skips.add(t);
+      // Only live cascade slots. A domains.json written against upstream may
+      // still name "tier1" (Firecrawl, removed in this fork); passing it on
+      // would log and count an operator skip for a tier that does not exist.
+      for (const t of tiers) if (CASCADE_SLOTS.has(t)) skips.add(t);
     }
   }
   return Array.from(skips);

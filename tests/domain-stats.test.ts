@@ -35,13 +35,11 @@ function mkRecord(
     last_fetch: "2026-06-01T00:00:00Z",
     capabilities,
     tier_stats_30d: {
-      tier1: stat(0, 0, 0),
       tier2: stat(0, 0, 0),
       tier3: stat(0, 0, 0),
       tier4: stat(0, 0, 0),
       github: stat(0, 0, 0),
       solver: stat(0, 0, 0),
-      crawl: stat(0, 0, 0),
       ...tiers,
     },
   };
@@ -185,24 +183,24 @@ describe("aggregateDomainStats — 30d window cutoff", () => {
   it("excludes out-of-window attempts from tier totals", () => {
     const agg = aggregateDomainStats(
       [
-        mkRecord("fresh.com", { tier1: stat(10, 8, 2) }),
-        mkRecord("stale.com", { tier1: expired(40, 1, 39) }),
+        mkRecord("fresh.com", { tier2: stat(10, 8, 2) }),
+        mkRecord("stale.com", { tier2: expired(40, 1, 39) }),
       ],
       false,
       NOW,
     );
     // Only fresh.com's numbers survive; stale.com's 40 attempts are outside the
     // window the field claims to report.
-    expect(agg.tiers.tier1.attempts).toBe(10);
-    expect(agg.tiers.tier1.ok).toBe(8);
-    expect(agg.tiers.tier1.success_rate).toBe(0.8);
+    expect(agg.tiers.tier2.attempts).toBe(10);
+    expect(agg.tiers.tier2.ok).toBe(8);
+    expect(agg.tiers.tier2.success_rate).toBe(0.8);
   });
 
   it("drops stale domains from top_failing", () => {
     // The reported symptom: grep.app's 0/10 was 26 days old and still driving
     // the failing-domains list.
     const agg = aggregateDomainStats(
-      [mkRecord("grep.app", { tier1: expired(10, 0, 10) })],
+      [mkRecord("grep.app", { tier2: expired(10, 0, 10) })],
       false,
       NOW,
     );
@@ -213,7 +211,7 @@ describe("aggregateDomainStats — 30d window cutoff", () => {
   it("still reports a domain failing inside the window", () => {
     // Control: same counts, current window.
     const agg = aggregateDomainStats(
-      [mkRecord("grep.app", { tier1: stat(10, 0, 10) })],
+      [mkRecord("grep.app", { tier2: stat(10, 0, 10) })],
       false,
       NOW,
     );
@@ -233,7 +231,7 @@ describe("aggregateDomainStats — 30d window cutoff", () => {
       [
         mkRecord(
           "idle.com",
-          { tier1: expired(10, 5, 5) },
+          { tier2: expired(10, 5, 5) },
           {
             seen_in_search: { count: 3, last_seen_at: "2026-06-01T00:00:00Z" },
           },
@@ -250,11 +248,11 @@ describe("aggregateDomainStats — 30d window cutoff", () => {
 describe("aggregateDomainStats", () => {
   it("sums per-tier attempts/ok/fail across domains and computes success rate", async () => {
     const records = [
-      mkRecord("a.com", { tier1: stat(10, 9, 1), github: stat(4, 3, 1) }),
-      mkRecord("b.com", { tier1: stat(10, 1, 9) }),
+      mkRecord("a.com", { tier2: stat(10, 9, 1), github: stat(4, 3, 1) }),
+      mkRecord("b.com", { tier2: stat(10, 1, 9) }),
     ];
     const agg = aggregateDomainStats(records);
-    expect(agg.tiers.tier1).toEqual({
+    expect(agg.tiers.tier2).toEqual({
       attempts: 20,
       ok: 10,
       fail: 10,
@@ -286,7 +284,7 @@ describe("aggregateDomainStats", () => {
       // fetched → not counted even though also seen
       mkRecord(
         "fetched.com",
-        { tier1: stat(2, 2, 0) },
+        { tier2: stat(2, 2, 0) },
         { seen_in_search: { count: 1, last_seen_at: "x" } },
       ),
       // never seen, never fetched → not counted
@@ -301,11 +299,11 @@ describe("aggregateDomainStats", () => {
       // 28 attempts, 0 ok → failing, most attempts
       mkRecord("raw.githubusercontent.com", { github: stat(28, 0, 28) }),
       // 10 attempts, 2 ok (20%) → failing
-      mkRecord("flaky.com", { tier1: stat(10, 2, 8) }),
+      mkRecord("flaky.com", { tier2: stat(10, 2, 8) }),
       // 10 attempts, 6 ok (60%) → above rate threshold, excluded
-      mkRecord("ok.com", { tier1: stat(10, 6, 4) }),
+      mkRecord("ok.com", { tier2: stat(10, 6, 4) }),
       // 3 attempts, 0 ok → below attempt threshold, excluded
-      mkRecord("new.com", { tier1: stat(3, 0, 3) }),
+      mkRecord("new.com", { tier2: stat(3, 0, 3) }),
     ];
     const agg = aggregateDomainStats(records);
     expect(agg.failing_count).toBe(2);
@@ -323,7 +321,7 @@ describe("aggregateDomainStats", () => {
 
   it("caps the failing list at ten entries", () => {
     const records = Array.from({ length: 15 }, (_, i) =>
-      mkRecord(`fail${i}.com`, { tier1: stat(20, 0, 20) }),
+      mkRecord(`fail${i}.com`, { tier2: stat(20, 0, 20) }),
     );
     const agg = aggregateDomainStats(records);
     expect(agg.failing_count).toBe(15);
@@ -339,8 +337,8 @@ describe("aggregateDomainStats", () => {
 // formatDomainRecord had no coverage at all, which is how it came to be a
 // hand-written roster of a closed set that TIER_SLOT_KEYS is supposed to own.
 // A slot added to the record but missed here records forever and never renders
-// in single-domain mode — the exact invisibility the `crawl` slot was added to
-// remove. Pinned generically so the next slot fails here until it is rendered,
+// in single-domain mode — the exact invisibility a per-slot roster exists to
+// prevent. Pinned generically so the next slot fails here until it is rendered,
 // rather than being discovered by an operator who cannot find their numbers.
 describe("formatDomainRecord renders every tier slot", () => {
   /** The tier-stats rows, in order, from a formatted record. */
@@ -357,9 +355,8 @@ describe("formatDomainRecord renders every tier slot", () => {
     // data") — so this cannot be satisfied by a neighbouring row.
     const carrying = block.filter((l) => l.includes("(3/7)"));
     expect(carrying).toHaveLength(1);
-    // Matched on the row's leading label rather than `includes(slot)`: every
-    // label contains "firecrawl", and "crawl" is a substring of both that and
-    // "crawl4ai", so a containment check passes against the wrong row.
+    // Matched on the row's leading label rather than `includes(slot)`, so a
+    // slot name appearing elsewhere in some other row cannot satisfy it.
     expect(carrying[0].trim().startsWith(slot)).toBe(true);
   });
 

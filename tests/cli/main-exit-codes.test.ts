@@ -114,7 +114,7 @@ describe("domain-db-maintenance emitGauges", () => {
     domains_tracked: 42,
     domains_failing: 3,
     tier_success_ratio: [
-      { tier: "tier1", ratio: 0.9 },
+      { tier: "tier2", ratio: 0.9 },
       { tier: "tier3", ratio: 0.5 },
     ],
   };
@@ -165,7 +165,7 @@ describe("domain-db-maintenance emitGauges", () => {
     expect(recorded).toEqual([
       ["searxng_domains_tracked", 42, undefined],
       ["searxng_domains_failing", 3, undefined],
-      ["searxng_domain_tier_success_ratio", 0.9, { tier: "tier1" }],
+      ["searxng_domain_tier_success_ratio", 0.9, { tier: "tier2" }],
       ["searxng_domain_tier_success_ratio", 0.5, { tier: "tier3" }],
     ]);
     vi.doUnmock("@opentelemetry/exporter-metrics-otlp-http");

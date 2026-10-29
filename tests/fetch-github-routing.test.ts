@@ -1,5 +1,5 @@
 // Verifies the fast-path routing decision added when github.ts was wired
-// into the cascade: a GitHub URL must bypass robots/tier1-3 entirely, and a
+// into the cascade: a GitHub URL must bypass robots and the tier cascade entirely, and a
 // non-GitHub URL must never touch githubFetch.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

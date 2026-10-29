@@ -25,29 +25,19 @@ choose (vikunja#697).
 ### Known limitation
 
 HTTPS is tunnelled via CONNECT without interception, so **filtering applies to
-plain-HTTP requests only**. HTTPS ad and tracker domains pass through. For
-in-browser filtering that covers HTTPS, see `docker/playwright-adblock/`
-(Firecrawl v2) or `docker/puppeteer-adblock/` (v1).
+plain-HTTP requests only**. HTTPS ad and tracker domains pass through.
 
 
 HTTP forward proxy that filters ad and tracker requests using `@ghostery/adblocker`
-(EasyList + EasyPrivacy by default). Used by searxng-mcp tiers 2 and 3.
+(EasyList + EasyPrivacy by default). Used by searxng-mcp tier 3 (raw Node fetch).
+Tier 2 (Crawl4AI) does not use it — see `docs/architecture.md`, "Tier 3 — Adblock proxy".
 
-## Architecture: two-sidecar adblocking
+## Why no HTTPS MITM
 
-searxng-mcp uses two independent adblock mechanisms, one per fetch tier:
-
-| Sidecar | Tier | Mechanism | HTTPS coverage |
-|---------|------|-----------|----------------|
-| `docker/puppeteer-adblock/` | Tier 1 (Firecrawl/Puppeteer) | CDP-level interception via `@ghostery/adblocker-puppeteer` — hooks into the browser's network stack | Full HTTPS filtering (same process, no MITM needed) |
-| `docker/adblock-proxy/` (this service) | Tiers 2+3 (Crawl4AI, raw Node fetch) | HTTP forward proxy — blocks matched plain-HTTP requests; CONNECT tunneled without interception | Plain-HTTP only |
-
-**Why no HTTPS MITM for tiers 2+3:** Full HTTPS filtering would require distributing
-a CA certificate to Crawl4AI's Playwright runtime and Node's TLS stack. The primary
-benefit of adblocking at tiers 2+3 is reducing outbound tracker/analytics requests
-(typically separate domain, often HTTP), not filtering inline ad content. The
-complexity-to-benefit ratio doesn't justify it. The tier-1 puppeteer hook already
-provides full HTTPS filtering for that tier.
+Full HTTPS filtering would require distributing a CA certificate to Node's TLS stack.
+The primary benefit of adblocking here is reducing outbound tracker/analytics requests
+(typically a separate domain, often HTTP), not filtering inline ad content. The
+complexity-to-benefit ratio doesn't justify it.
 
 ## Usage
 

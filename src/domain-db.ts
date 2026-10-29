@@ -31,12 +31,18 @@ export const DOMAIN_RECORD_TTL_SECONDS = 90 * 24 * 60 * 60;
 // reset cost is near zero here: the firecrawl-upstream-2026-09 bake window that
 // decides the v1/v2 cutover is measured from this release's ship date anyway,
 // so the window being discarded is one that had not started counting.
+//
+// NOT bumped for the removal of the `tier1` (Firecrawl) and `crawl` (Firecrawl
+// crawl phase) slots in this fork. A bump discards every record, and while old
+// and new builds run side by side — several per-agent stdio children share one
+// database — each would keep resetting the other's records. The shape change
+// is a pure narrowing instead: nothing reads those keys any more, and
+// `updateRecord` drops them on the next write (see LEGACY_SLOT_KEYS).
 export const SCHEMA_VERSION = 7;
 export const TIER_STATS_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const WINDOW_MS = TIER_STATS_WINDOW_MS;
 
 export type TierName =
-  | "tier1_firecrawl"
   | "tier2_crawl4ai"
   | "tier3_rawfetch"
   | "tier4_wayback"
@@ -49,12 +55,7 @@ export type TierName =
   // no TierSlot: it is dispatched directly in fetchPage rather than being part
   // of the ordered cascade, so it stays out of computeTierSkips and the
   // tier_skip domain config entirely.
-  | "solver_byparr"
-  // crawl_site's Firecrawl crawl phase. Like solver_byparr and github, a
-  // TierName with no TierSlot in the fetch cascade: computeTierSkips only
-  // consults tier1/tier2/tier3, so this slot records without ever influencing
-  // fetch routing.
-  | "crawl_firecrawl";
+  | "solver_byparr";
 
 /**
  * The tier_stats_30d slot keys — the single roster of this closed set.
@@ -65,21 +66,21 @@ export type TierName =
  * restore guard, and neither array is exhaustiveness-checked by the compiler.
  */
 export const TIER_SLOT_KEYS = [
-  "tier1",
   "tier2",
   "tier3",
   "tier4",
   "github",
   "solver",
-  // crawl_site's Firecrawl crawl phase. Not a fetch tier — crawl_site has its
-  // own strategy cascade and never goes through runTier() — but it is a
-  // per-domain attempt with a hit/miss outcome, and giving it a slot is what
-  // makes "this phase never succeeds" legible in domain_stats instead of
-  // needing a live probe to discover.
-  "crawl",
 ] as const;
 export type TierSlotKey = (typeof TIER_SLOT_KEYS)[number];
-export type PreferredStrategy = "llms_full_txt" | "tier1" | "tier2" | "tier3";
+export type PreferredStrategy = "llms_full_txt" | "tier2" | "tier3";
+
+/**
+ * Slots that schema-7 records written by upstream builds still carry: `tier1`
+ * (Firecrawl scrape) and `crawl` (Firecrawl crawl phase). Stripped on write so
+ * records converge on the narrowed shape without a schema bump.
+ */
+const LEGACY_SLOT_KEYS = ["tier1", "crawl"] as const;
 
 export interface TierStat {
   attempts: number;
@@ -197,13 +198,11 @@ function newRecord(domain: string, now: string): DomainRecord {
     last_fetch: now,
     capabilities: {},
     tier_stats_30d: {
-      tier1: emptyStat(),
       tier2: emptyStat(),
       tier3: emptyStat(),
       tier4: emptyStat(),
       github: emptyStat(),
       solver: emptyStat(),
-      crawl: emptyStat(),
     },
   };
 }
@@ -281,6 +280,11 @@ function updateRecord(
     } else {
       record = newRecord(hostname, now);
     }
+    const stats = record.tier_stats_30d as Record<string, TierStat>;
+    for (const legacy of LEGACY_SLOT_KEYS) delete stats[legacy];
+    if ((record.preferred_strategy as string | undefined) === "tier1") {
+      delete record.preferred_strategy;
+    }
     mutate(record);
     record.last_fetch = now;
     return JSON.stringify(record);
@@ -288,13 +292,11 @@ function updateRecord(
 }
 
 const TIER_KEY: Record<TierName, TierSlotKey> = {
-  tier1_firecrawl: "tier1",
   tier2_crawl4ai: "tier2",
   tier3_rawfetch: "tier3",
   tier4_wayback: "tier4",
   github: "github",
   solver_byparr: "solver",
-  crawl_firecrawl: "crawl",
 };
 
 export async function recordTierAttempt(

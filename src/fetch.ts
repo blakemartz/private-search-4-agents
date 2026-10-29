@@ -118,9 +118,9 @@ interface TierOutcome {
  * Cap on a single tier's failure reason in the surfaced error.
  *
  * Most reasons are short and ours — "attempted, no content", a status code. But
- * one is neither: `data.error` from Firecrawl is upstream-controlled text of
- * unbounded length, and this is the first change that relays a tier's own error
- * to the caller rather than swallowing it. An error message is not a transport
+ * one is neither: Crawl4AI's error prose is upstream-controlled text of
+ * unbounded length, and this path relays a tier's own error to the caller
+ * rather than swallowing it. An error message is not a transport
  * for an arbitrary upstream payload.
  *
  * Only length is bounded, not content. Every reason this can carry is already
@@ -128,7 +128,7 @@ interface TierOutcome {
  * resolved address off its message, raw.ts's redirect throw deliberately omits
  * the Location header, and the tier errors carry status codes rather than URLs.
  */
-// SECURITY[accepted]: relaying Firecrawl's upstream `data.error` verbatim, bounded
+// SECURITY[accepted]: relaying a tier's upstream error text verbatim, bounded
 // to 200 chars, is accepted rather than classified down to a canned reason. This
 // server is loopback-only and its callers are forge agents that already hold the
 // requested URL, so the text discloses nothing they do not have; every other
@@ -500,42 +500,37 @@ export async function fetchPage(
         );
       }
 
-      // Tier1 (Firecrawl) and tier2 (Crawl4AI) resolve and fetch the URL on our
-      // behalf, so the connect-time DNS guard can't cover them. Pre-resolve the
+      // Tier 2 (Crawl4AI) resolves and fetches the URL on our behalf, so the
+      // connect-time DNS guard can't cover it. Pre-resolve the
       // hostname here (once, before any external-fetcher dispatch) so a public
       // hostname that DNS-rebinds to an internal address is rejected before it's
-      // handed to those services — the string-level assertPublicUrl above only
+      // handed to that service — the string-level assertPublicUrl above only
       // catches literal private IPs. Throws SsrfBlockedError on a private
       // resolution (surfaces to the caller as a fetch error).
       await assertResolvedPublic(url);
 
-      // SECURITY[accepted]: PDF URLs now take this path to tier 1 rather than
-      // being diverted earlier, so they share tier 1's pre-existing SSRF-10
-      // exposure — Firecrawl and Crawl4AI resolve and connect in their own
-      // processes, so the pre-check above narrows but cannot fully close the
-      // DNS-rebinding TOCTOU window for them. No new code-level gap: the gap is
+      // SECURITY[accepted]: PDF URLs take this path to tier 2 rather than
+      // being diverted earlier, so they share tier 2's pre-existing SSRF-10
+      // exposure — Crawl4AI resolves and connects in its own process, so the
+      // pre-check above narrows but cannot fully close the DNS-rebinding
+      // TOCTOU window for it. No new code-level gap: the gap is
       // unchanged, only the set of URLs traversing it grew. Audit:
       // 2026-09-06/searxng-mcp-fix-pass-2026-09, finding SSRF-10 (Low) —
       // auditor's own disposition was "no action required from this build".
       // SECURITY[control]: assertResolvedPublic runs once here, before any tier
       // dispatch, for every URL including PDFs.
 
-      // No PDF fast path. There used to be one here, routing every `.pdf` URL
-      // straight to tier 2 on the strength of "Firecrawl can't extract PDF
-      // text". That was true of trieve/firecrawl v0.0.55 and is false of v2,
-      // which extracts PDFs natively (see FirecrawlCapabilities.pdf). Worse,
-      // the tier it diverted to cannot do the job at all: Crawl4AI renders the
-      // PDF in a browser, finds no text nodes, and misfires its anti-bot
-      // heuristic, and the resulting null was reported as "CRAWL4AI_URL not
-      // configured" on containers where it plainly was. PDFs now take the
-      // ordinary cascade, so tier 1 serves them and a v1 backend degrades
-      // through to the message in tiers/raw.ts (vikunja#682).
+      // No PDF fast path. Neither rendering tier extracts PDF text: Crawl4AI
+      // renders the PDF in a browser, finds no text nodes and misfires its
+      // anti-bot heuristic, so PDFs fall through to tier 3, which rejects them
+      // with an explicit message (tiers/raw.ts). Firecrawl v2 parsed PDFs
+      // natively; it was removed in this fork, so PDF support needs a local
+      // extractor ahead of the cascade (vikunja#682 for the history).
 
       // Content-type fast path — a JSON/XML/YAML/CSV/plain-text endpoint has
-      // nothing for a headless browser to render. Firecrawl returns empty
-      // markdown for these and runTier books it as `empty_result`, which is how
-      // tier1 accumulated a 0/27 lifetime record made up almost entirely of API
-      // and CDN hosts while Firecrawl itself was healthy.
+      // nothing for a headless browser to render. A rendering tier returns
+      // empty markdown for these and runTier books it as `empty_result`, which
+      // poisons that tier's per-domain success rate for API and CDN hosts.
       //
       // Probe is fail-open: an unreachable, HEAD-refusing or HTML-serving host
       // returns null and drops through to the normal cascade unchanged. Only a
@@ -604,9 +599,7 @@ export async function fetchPage(
         );
         if (fetched) {
           tierServed = tier.name;
-          if (tier.slot !== "tier1") {
-            console.error(`[searxng-mcp] fetch ${tier.slot} hit url=${url}`);
-          }
+          console.error(`[searxng-mcp] fetch ${tier.slot} hit url=${url}`);
           break;
         }
         console.error(`[searxng-mcp] fetch ${tier.slot} miss url=${url}`);

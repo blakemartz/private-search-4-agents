@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
@@ -117,7 +117,7 @@ describe("rawFetch", () => {
       body: bodyStream("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj"),
     });
     await expect(rawFetch(URL)).rejects.toThrow(
-      "PDF content cannot be extracted by raw fetch",
+      "PDF content cannot be extracted — no tier in this build parses PDF text",
     );
   });
 
@@ -142,10 +142,10 @@ describe("rawFetch", () => {
 });
 
 describe("rawFetch — PDF failure message names the real cause", () => {
-  // The old message read "use Crawl4AI", which was wrong twice over: Crawl4AI
-  // cannot parse PDFs either, and reaching tier 3 at all means tier 1 already
-  // declined. What the operator needs to know is which of those two situations
-  // they are in, and that depends on the configured backend version.
+  // The old message read "use Crawl4AI", which was wrong: Crawl4AI cannot
+  // parse PDFs either. With Firecrawl removed, no tier in this build extracts
+  // PDF text, and the message must say exactly that rather than send the
+  // operator after a backend that will not help.
   const pdfResponse = () => ({
     ok: true,
     status: 200,
@@ -154,37 +154,21 @@ describe("rawFetch — PDF failure message names the real cause", () => {
     body: bodyStream("%PDF-1.4\ntrailer"),
   });
 
-  afterEach(() => {
-    delete process.env.FIRECRAWL_API_VERSION;
-    vi.resetModules();
-  });
-
-  it("under v1, points at the backend version — no config change will help", async () => {
-    process.env.FIRECRAWL_API_VERSION = "v1";
-    vi.resetModules();
-    const { rawFetch: freshRawFetch } = await import("../../src/tiers/raw.js");
+  it("states that no tier in this build parses PDF text", async () => {
     mockFetch.mockResolvedValueOnce(pdfResponse());
-    await expect(freshRawFetch(URL)).rejects.toThrow(
-      /FIRECRAWL_API_VERSION is v1, which has no PDF support/,
-    );
-  });
-
-  it("under v2, points at tier 1 — PDFs are supported, so this URL is the problem", async () => {
-    process.env.FIRECRAWL_API_VERSION = "v2";
-    vi.resetModules();
-    const { rawFetch: freshRawFetch } = await import("../../src/tiers/raw.js");
-    mockFetch.mockResolvedValueOnce(pdfResponse());
-    await expect(freshRawFetch(URL)).rejects.toThrow(
-      /tier 1 \(Firecrawl\) handles PDFs but returned nothing/,
+    await expect(rawFetch(URL)).rejects.toThrow(
+      /no tier in this build parses PDF text/,
     );
   });
 
   it("never tells the operator to use Crawl4AI, which cannot parse PDFs", async () => {
-    process.env.FIRECRAWL_API_VERSION = "v2";
-    vi.resetModules();
-    const { rawFetch: freshRawFetch } = await import("../../src/tiers/raw.js");
     mockFetch.mockResolvedValueOnce(pdfResponse());
-    await expect(freshRawFetch(URL)).rejects.not.toThrow(/Crawl4AI/);
+    await expect(rawFetch(URL)).rejects.not.toThrow(/Crawl4AI/);
+  });
+
+  it("does not point at a Firecrawl tier that no longer exists", async () => {
+    mockFetch.mockResolvedValueOnce(pdfResponse());
+    await expect(rawFetch(URL)).rejects.not.toThrow(/Firecrawl|tier 1/i);
   });
 });
 

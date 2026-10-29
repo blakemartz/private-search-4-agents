@@ -76,7 +76,7 @@ describe.skipIf(!TEST_URL)("domain-db concurrency (real Valkey)", () => {
     // connection, the losing writes were discarded with no error — which is why
     // `capabilities.metadata_fetch` was populated on 0 of 572 live records.
     await Promise.all([
-      recordTierAttempt(`https://${hostname}/a`, "tier1_firecrawl", "hit"),
+      recordTierAttempt(`https://${hostname}/a`, "tier2_crawl4ai", "hit"),
       recordMetadataFetchAttempt(`https://${hostname}/a`, true),
       recordPostExtractSample(`https://${hostname}/a`, {
         jsonLdPresent: true,
@@ -86,8 +86,8 @@ describe.skipIf(!TEST_URL)("domain-db concurrency (real Valkey)", () => {
 
     const record = await getDomainRecord(hostname);
     expect(record).not.toBeNull();
-    expect(record?.tier_stats_30d.tier1.attempts).toBe(1);
-    expect(record?.tier_stats_30d.tier1.ok).toBe(1);
+    expect(record?.tier_stats_30d.tier2.attempts).toBe(1);
+    expect(record?.tier_stats_30d.tier2.ok).toBe(1);
     expect(record?.capabilities.metadata_fetch?.attempts).toBe(1);
     expect(record?.capabilities.metadata_fetch?.ok).toBe(1);
     expect(record?.capabilities.json_ld_article?.sampled).toBe(1);
@@ -102,7 +102,7 @@ describe.skipIf(!TEST_URL)("domain-db concurrency (real Valkey)", () => {
       Array.from({ length: N }, (_, i) =>
         recordTierAttempt(
           `https://${hostname}/p${i}`,
-          "tier1_firecrawl",
+          "tier2_crawl4ai",
           i % 2 === 0 ? "hit" : "miss",
           i % 2 === 0 ? undefined : "synthetic",
         ),
@@ -110,9 +110,9 @@ describe.skipIf(!TEST_URL)("domain-db concurrency (real Valkey)", () => {
     );
 
     const record = await getDomainRecord(hostname);
-    expect(record?.tier_stats_30d.tier1.attempts).toBe(N);
-    expect(record?.tier_stats_30d.tier1.ok).toBe(N / 2);
-    expect(record?.tier_stats_30d.tier1.fail).toBe(N / 2);
+    expect(record?.tier_stats_30d.tier2.attempts).toBe(N);
+    expect(record?.tier_stats_30d.tier2.ok).toBe(N / 2);
+    expect(record?.tier_stats_30d.tier2.fail).toBe(N / 2);
   });
 
   it("interleaves distinct writer types without loss at N=50", async () => {

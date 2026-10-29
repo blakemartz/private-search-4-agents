@@ -1,8 +1,7 @@
 # ── RUNG 2 of 4 — crawl4ai ────────────────────────────────────────────────────
 #
-# Rung 1 plus a cache and a real tier-2 fetcher. THIS IS THE RUNG TO START AT if
-# Firecrawl is more than you want to run — Crawl4AI renders JavaScript, needs no
-# API key, and costs one container instead of three.
+# Rung 1 plus a cache and a real tier-2 fetcher. THIS IS THE RUNG TO START AT —
+# Crawl4AI renders JavaScript, needs no API key, and costs one container.
 #
 #   Containers   4  (rung 1's two, plus cache and crawl4ai)
 #   RAM          ~6 GB total  (crawl4ai alone is capped at 4g below)
@@ -14,14 +13,12 @@
 #   caching                          now real — searches and fetched pages persist
 #                                    across restarts, and `clear_cache` does something
 #   `domain_stats`                   now durable — the capability DB survives a restart
-#   `crawl_site`                     still sitemap/BFS (the Firecrawl crawl is rung 4)
 #   `search_and_summarize`           still NO — needs an LLM, which is rung 4
-#   PDFs                             still NO — that is Firecrawl v2, rung 4
 #
 # THE CAPABILITY LINE THIS RUNG PRINTS — measured 2026-09-07:
 #
 #   capabilities on=tier3 unverified=tier2,cache \
-#     off=tier1,reranker,llm,kiwix,hister,solver,wayback,otel,nats
+#     off=reranker,llm,kiwix,hister,solver,wayback,otel,nats
 #
 # READ `unverified` CORRECTLY. It means "configured, and this process has not
 # contacted it" — nothing probes at startup, so it is the honest absence of a
@@ -57,8 +54,8 @@ services:
     # `GET /` 200, and `?format=json` 200.
     #
     # An earlier draft of this file granted SETUID and SETGID here, reasoning by
-    # analogy from `cache` and `firecrawl-redis` (whose entrypoints DO drop
-    # privileges with setpriv and do need them). SearXNG's does not, and the
+    # analogy from `cache` (whose entrypoint DOES drop privileges with
+    # setpriv and does need them). SearXNG's does not, and the
     # comment asserted a verification that had never been run. Two capabilities
     # were being handed to an adopter's container for no reason.
     #
@@ -169,12 +166,6 @@ services:
       CRAWL4AI_URL: http://crawl4ai:11235
       CRAWL4AI_API_TOKEN: "${CRAWL4AI_API_TOKEN:-}"
 
-      # Still off: no Firecrawl at this rung, and FIRECRAWL_URL defaults to
-      # http://localhost:3002, so without this every fetch attempts a dead tier 1
-      # first and books the failure into the domain capability database — which
-      # then routes around a tier that was never broken, only absent.
-      FIRECRAWL_ENABLED: "false"
-
       # Still off: no reranker container until rung 3, and RERANKER_URL defaults
       # to http://localhost:8787. Empty string is the only way off — there is no
       # kill switch. Leaving it defaulted makes every search issue a doomed
@@ -195,5 +186,4 @@ services:
 #   CACHE_URL            redis://localhost:6381    # if running searxng-mcp on the host
 #   CRAWL4AI_URL         http://localhost:11235
 #   CRAWL4AI_API_TOKEN   <same value as above>
-#   FIRECRAWL_ENABLED    false
 #   RERANKER_URL         <empty>

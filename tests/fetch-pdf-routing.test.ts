@@ -1,18 +1,17 @@
-// Regression guard for vikunja#682: a PDF URL must take the ordinary cascade
-// and be served by tier 1.
+// Regression guard for vikunja#682: a PDF URL must take the ordinary cascade,
+// in tier order, rather than being diverted by URL shape.
 //
-// The bug this replaces was a fast path in fetchPage that matched `.pdf` on the
-// pathname and dispatched straight to tier 2, on a comment asserting "Firecrawl
-// can't extract PDF text". That was true of trieve/firecrawl v0.0.55 and false
-// of the v2 backend, which extracts PDFs natively — verified live 2026-09-05,
-// 475,850 characters of markdown from RFC 9110's PDF. Crawl4AI, meanwhile,
-// renders the PDF in a browser, finds no text nodes, and fails its own anti-bot
-// heuristic, so the fast path routed every PDF to the one tier that could not
-// serve it.
+// The bug this replaced was a fast path in fetchPage that matched `.pdf` on the
+// pathname and dispatched straight to tier 2. The tier that path skipped
+// (Firecrawl v2, which parsed PDFs natively) has since been removed in this
+// fork, but the routing rule it established still holds: there is no PDF fast
+// path, so a PDF is offered to each active tier in order and falls through on a
+// miss, and the extensionless PDFs a suffix matcher could never see route the
+// same way.
 //
 // These cases prove the *routing*. They cannot prove PDFs work end-to-end — the
-// tiers are stubs here. That check is a real fetch_url against a real PDF with
-// tier_served asserted, recorded in the build plan's verification section.
+// tiers are stubs here, and no tier in this build extracts PDF text (see the
+// message in tiers/raw.ts).
 //
 // Mock surface copied from fetch-content-type-routing.test.ts.
 
@@ -108,15 +107,15 @@ vi.mock("../src/extractors/post-extract.js", () => ({
 }));
 
 const tiers = vi.hoisted(() => ({
-  tier1Fetch: vi.fn(),
   tier2Fetch: vi.fn(),
+  tier3Fetch: vi.fn(),
 }));
 
 vi.mock("../src/routing.js", () => ({
   getTiers: vi.fn().mockResolvedValue({
     active: [
-      { name: "tier1_firecrawl", slot: "tier1", fetch: tiers.tier1Fetch },
       { name: "tier2_crawl4ai", slot: "tier2", fetch: tiers.tier2Fetch },
+      { name: "tier3_rawfetch", slot: "tier3", fetch: tiers.tier3Fetch },
     ],
     skipped: [],
   }),
@@ -136,7 +135,7 @@ import { recordTierAttempt } from "../src/domain-db.js";
 import { events } from "../src/events.js";
 import { fetchPage } from "../src/fetch.js";
 
-const { tier1Fetch, tier2Fetch } = tiers;
+const { tier2Fetch, tier3Fetch } = tiers;
 const fetchCompletedMock = vi.mocked(events.fetchCompleted);
 const recordTierAttemptMock = vi.mocked(recordTierAttempt);
 
@@ -144,82 +143,80 @@ const PDF_URL = "https://www.rfc-editor.org/rfc/rfc9110.pdf";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  tier1Fetch.mockResolvedValue({
+  tier2Fetch.mockResolvedValue({
     title: "RFC 9110",
     url: PDF_URL,
     text: "HTTP Semantics",
   });
-  tier2Fetch.mockResolvedValue(null);
+  tier3Fetch.mockResolvedValue(null);
 });
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("fetchPage — PDF routing", () => {
-  it("serves a .pdf URL from tier1_firecrawl", async () => {
+  it("offers a .pdf URL to the first active tier, and serves its result", async () => {
     const result = await fetchPage(PDF_URL);
 
-    expect(tier1Fetch).toHaveBeenCalledOnce();
-    expect(result.text).toContain("HTTP Semantics");
-    // The assertion that actually pins the bug: tier1 must be the tier of
-    // record, not merely a tier that ran. A 200 from the wrong tier is not a
-    // pass.
-    expect(fetchCompletedMock).toHaveBeenCalledWith(
-      expect.objectContaining({ tier_served: "tier1_firecrawl" }),
-    );
-  });
-
-  it("never dispatches a .pdf URL to tier2 while tier1 can serve it", async () => {
-    await fetchPage(PDF_URL);
-
-    expect(tier2Fetch).not.toHaveBeenCalled();
-    expect(
-      recordTierAttemptMock.mock.calls.some(
-        (call) => call[1] === "tier2_crawl4ai",
-      ),
-    ).toBe(false);
-  });
-
-  it("books the attempt against tier1, so domain_stats stops blaming tier2", async () => {
-    await fetchPage(PDF_URL);
-
-    expect(recordTierAttemptMock).toHaveBeenCalledWith(
-      PDF_URL,
-      "tier1_firecrawl",
-      "hit",
-    );
-  });
-
-  it("falls through to tier2 when tier1 misses, rather than short-circuiting", async () => {
-    // The cascade still applies to PDFs — deleting the fast path must not
-    // pin them to tier 1 the way it previously pinned them to tier 2.
-    tier1Fetch.mockResolvedValue(null);
-    tier2Fetch.mockResolvedValue({
-      title: "RFC 9110",
-      url: PDF_URL,
-      text: "from tier two",
-    });
-
-    const result = await fetchPage(PDF_URL);
-
-    expect(tier1Fetch).toHaveBeenCalledOnce();
     expect(tier2Fetch).toHaveBeenCalledOnce();
-    expect(result.text).toContain("from tier two");
+    expect(result.text).toContain("HTTP Semantics");
+    // The tier of record, not merely a tier that ran. A 200 from the wrong
+    // tier is not a pass.
     expect(fetchCompletedMock).toHaveBeenCalledWith(
       expect.objectContaining({ tier_served: "tier2_crawl4ai" }),
     );
   });
 
-  it("routes an extensionless PDF the same way — the old fast path could not see these", async () => {
-    // The suffix matcher missed every PDF served without a .pdf path, which is
-    // why keying on the URL was the wrong predicate even before v2 made the
-    // whole fast path obsolete.
+  it("does not dispatch to a later tier once an earlier one serves it", async () => {
+    await fetchPage(PDF_URL);
+
+    expect(tier3Fetch).not.toHaveBeenCalled();
+    expect(
+      recordTierAttemptMock.mock.calls.some(
+        (call) => call[1] === "tier3_rawfetch",
+      ),
+    ).toBe(false);
+  });
+
+  it("books the attempt against the tier that served it", async () => {
+    await fetchPage(PDF_URL);
+
+    expect(recordTierAttemptMock).toHaveBeenCalledWith(
+      PDF_URL,
+      "tier2_crawl4ai",
+      "hit",
+    );
+  });
+
+  it("falls through to tier3 when tier2 misses, rather than short-circuiting", async () => {
+    // The cascade still applies to PDFs — there is no fast path pinning them
+    // to any one tier.
+    tier2Fetch.mockResolvedValue(null);
+    tier3Fetch.mockResolvedValue({
+      title: "RFC 9110",
+      url: PDF_URL,
+      text: "from tier three",
+    });
+
+    const result = await fetchPage(PDF_URL);
+
+    expect(tier2Fetch).toHaveBeenCalledOnce();
+    expect(tier3Fetch).toHaveBeenCalledOnce();
+    expect(result.text).toContain("from tier three");
+    expect(fetchCompletedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ tier_served: "tier3_rawfetch" }),
+    );
+  });
+
+  it("routes an extensionless PDF the same way — a suffix matcher could not see these", async () => {
+    // The old suffix matcher missed every PDF served without a .pdf path,
+    // which is why keying on the URL was the wrong predicate.
     const url = "https://example.com/download?doc=9110";
 
     await fetchPage(url);
 
-    expect(tier1Fetch).toHaveBeenCalledOnce();
+    expect(tier2Fetch).toHaveBeenCalledOnce();
     expect(fetchCompletedMock).toHaveBeenCalledWith(
-      expect.objectContaining({ tier_served: "tier1_firecrawl" }),
+      expect.objectContaining({ tier_served: "tier2_crawl4ai" }),
     );
   });
 });

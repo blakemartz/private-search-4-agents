@@ -102,7 +102,8 @@ reviews:
         `safeFetch` (`fetch-utils.ts`), which layers `assertPublicUrl` over a
         DNS-validating undici dispatcher that re-checks each redirect hop. Flag any new
         fetch path that bypasses it. The configured internal services — SearXNG,
-        Firecrawl, Crawl4AI, Ollama, the reranker — are intentionally exempt.
+        Crawl4AI, Ollama, the reranker, Kiwix, Hister, the solver — are
+        intentionally exempt.
 
         A telemetry span must wrap work actually performed, not a call site merely
         traversed. A `withSpan` opened *before* a guard clause that can return early
