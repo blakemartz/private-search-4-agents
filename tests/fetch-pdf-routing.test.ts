@@ -30,6 +30,8 @@ const flags = vi.hoisted(() => ({
 
 vi.mock("../src/config.js", () => ({
   FETCH_CACHE_TTL_SECONDS: 86400,
+  // These suites exercise the browser-first order; raw-first has its own.
+  FETCH_RAW_FIRST: false,
   get PDF_EXTRACT_ENABLED() {
     return flags.enabled;
   },

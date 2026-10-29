@@ -420,3 +420,7 @@ export const RERANK_AUTHORITY_WEIGHT = (() => {
 // clear_cache wipes cache shared by every agent on the box.
 export const ADMIN_TOOLS_ENABLED =
   process.env.SEARXNG_MCP_ADMIN_TOOLS === "true";
+
+// Fetch raw HTTP before the headless-browser tier (see orderTiers in fetch.ts).
+// Read as `!== "false"`, matching the other fetch switches.
+export const FETCH_RAW_FIRST = process.env.FETCH_RAW_FIRST !== "false";

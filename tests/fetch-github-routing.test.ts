@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/config.js", () => ({
   FETCH_CACHE_TTL_SECONDS: 86400,
+  // These suites exercise the browser-first order; raw-first has its own.
+  FETCH_RAW_FIRST: false,
   PDF_EXTRACT_ENABLED: true,
   PDF_MAX_BYTES: 20 * 1024 * 1024,
   PDF_MAX_PAGES: 50,

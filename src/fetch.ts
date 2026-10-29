@@ -6,6 +6,7 @@ import {
 } from "./challenge.js";
 import {
   FETCH_CACHE_TTL_SECONDS,
+  FETCH_RAW_FIRST,
   PDF_EXTRACT_ENABLED,
   PDF_MAX_BYTES,
   PDF_MAX_PAGES,
@@ -20,6 +21,7 @@ import {
 } from "./domain-db.js";
 import { getBlockList, urlMatchesDomain } from "./domains.js";
 import { events } from "./events.js";
+import { proseLength } from "./extractors/markdown.js";
 import { postExtract } from "./extractors/post-extract.js";
 import {
   assertPublicUrl,
@@ -42,6 +44,7 @@ import {
   isGithubFastPathUrl,
   rawFetch,
   solverFetch,
+  type Tier,
   waybackFetch,
 } from "./tiers/index.js";
 import { isYouTubeHost, youtubeFetch } from "./youtube.js";
@@ -200,6 +203,32 @@ async function runTier<T extends TierResult | null>(
     onOutcome?.({ tier, reason: boundRelayedText(reason) });
     return null as T;
   }
+}
+
+/**
+ * Prose a raw fetch must extract to be accepted without trying the browser.
+ * Measured 2026-10-28 on twelve documentation pages: raw HTTP + Readability
+ * found the answer on all twelve (prose 2,021–35,950), at 0.5–2s against
+ * Crawl4AI's 1.2–3.4s; Crawl4AI missed the answer on one and errored on
+ * another. A JS-rendered shell extracts far less than this and falls through.
+ */
+const RAW_ACCEPT_PROSE_CHARS = 1500;
+
+/**
+ * Cascade order: raw HTTP before the headless browser, unless the caller
+ * asked to wait for a selector — that only means something on a rendered page
+ * — or FETCH_RAW_FIRST=false. Tier routing (skips) has already been applied,
+ * so a domain where raw habitually fails never gets here with tier3 at all.
+ */
+export function orderTiers(
+  tiers: readonly Tier[],
+  tuning?: FetchTuning,
+): Tier[] {
+  if (!FETCH_RAW_FIRST || tuning?.waitForSelector) return [...tiers];
+  return [
+    ...tiers.filter((t) => t.slot === "tier3"),
+    ...tiers.filter((t) => t.slot !== "tier3"),
+  ];
 }
 
 // The fetch cache always stores up to this ceiling and callers slice it down on
@@ -670,8 +699,13 @@ export async function fetchPage(
       // Run tier cascade and side-channel raw-HTML metadata fetch in parallel.
       const metadataHtmlPromise = fetchRawHtmlForMetadata(url);
 
+      // Raw first, browser second (see orderTiers). A raw result too thin
+      // to be the page is held back rather than discarded: if the browser
+      // tier then fails, the thin result still beats no result.
+      const ordered = orderTiers(activeTiers, tuning);
       let fetched: TierResult | null = null;
-      for (const tier of activeTiers) {
+      let thin: TierResult | null = null;
+      for (const [i, tier] of ordered.entries()) {
         fetched = await runTier(
           tier.name,
           url,
@@ -679,12 +713,29 @@ export async function fetchPage(
           onChallenge,
           noteOutcome,
         );
+        if (
+          fetched &&
+          tier.slot === "tier3" &&
+          i < ordered.length - 1 &&
+          proseLength(fetched.text) < RAW_ACCEPT_PROSE_CHARS
+        ) {
+          console.error(
+            `[searxng-mcp] fetch tier3 thin url=${url} — trying the rendering tier`,
+          );
+          thin = fetched;
+          fetched = null;
+          continue;
+        }
         if (fetched) {
           tierServed = tier.name;
           console.error(`[searxng-mcp] fetch ${tier.slot} hit url=${url}`);
           break;
         }
         console.error(`[searxng-mcp] fetch ${tier.slot} miss url=${url}`);
+      }
+      if (!fetched && thin) {
+        fetched = thin;
+        tierServed = "tier3_rawfetch";
       }
 
       // Challenge solver. Detection-gated: it fires only when a tier actually

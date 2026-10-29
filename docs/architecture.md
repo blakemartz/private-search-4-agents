@@ -124,6 +124,12 @@ As of v3.19.0, the proxy validates the **resolved** address — not just the req
 
 See [`docker/adblock-proxy/`](../docker/adblock-proxy/) for the service definition, configuration options, and deployment instructions (included in `examples/compose.full.yml`, rung 4).
 
+## Raw-first cascade order
+
+The cascade *list* is tier 2 (Crawl4AI) then tier 3 (raw HTTP + Readability), but it *runs* raw first (`orderTiers` in `src/fetch.ts`). A raw result is accepted when it extracts at least 1,500 chars of prose; anything thinner — a JS shell, a "please enable JavaScript" page — falls through to Crawl4AI, and is kept as the answer if Crawl4AI then fails too. `wait_for_selector` keeps the browser first (waiting only means something on a rendered page), as does `FETCH_RAW_FIRST=false`.
+
+Why: measured 2026-10-28 on twelve documentation pages, raw found the answer on all twelve at 0.5–2s against Crawl4AI's 1.2–3.4s; Crawl4AI missed the answer on one page and errored on another. On the held-out benchmark with a cold cache, `fetch_url` `query` went from a 3.5s to a 1.5s median and highlights from 7.5s to 5.4s, answer rate unchanged at 100%.
+
 ## Data-driven tier routing
 
 Before invoking the fetch cascade, searxng-mcp reads the domain's `tier_stats_30d` (see [domain capability database](#domain-capability-database)) and skips any tier with success rate below 30% over at least 10 attempts. Cold-start domains (<10 attempts) keep the default cascade. Each skip emits a `searxng.fetch.tier.skipped` NATS event and increments `searxng_fetch_total{outcome=skipped}`, both carrying the reason. Three reasons exist: `low_success_rate` (the stats rule above), `operator_override` (a `tier_skip` entry in `domains.json`), and `not_configured` (the tier's service is switched off, or has no URL). `not_configured` takes precedence over both others — an override cannot un-skip a tier there is nothing to call. Because a skipped tier is never recorded as an attempt, an unconfigured tier no longer books misses into `tier_stats_30d` meaning “not deployed” rather than “tried and failed”.

@@ -34,6 +34,7 @@ All service URLs are configurable via environment variables.
 | `CRAWL_BFS_MAX_DEPTH` | `3` | Maximum link-hop depth for BFS crawl |
 | `EXPAND_QUERIES` | `false` | Set to `true` to enable query expansion globally |
 | `CRAWL4AI_URL` | *(unset)* | Crawl4AI instance URL — enables tier 2, the JS-rendering first tier of the fetch cascade. Unset, fetches go straight to tier 3 (raw HTTP) |
+| `FETCH_RAW_FIRST` | `true` | Try the raw HTTP tier before Crawl4AI; a raw result under ~1,500 chars of prose falls through to the browser. `false` restores browser-first. See [architecture](architecture.md#raw-first-cascade-order) |
 | `CRAWL4AI_ENABLED` | `true` | Set to `false` to skip tier 2 regardless of `CRAWL4AI_URL`. Tier 2 is also skipped when `CRAWL4AI_URL` is unset |
 | `CRAWL4AI_API_TOKEN` | *(unset)* | Optional Bearer token for Crawl4AI instances with API token protection |
 | `WAYBACK_ENABLED` | `false` | Set to `true` to enable Wayback Machine tier-4 fallback — fetches archived snapshots when the main tiers fail |
