@@ -38,6 +38,12 @@ export const DOMAIN_RECORD_TTL_SECONDS = 90 * 24 * 60 * 60;
 // database — each would keep resetting the other's records. The shape change
 // is a pure narrowing instead: nothing reads those keys any more, and
 // `updateRecord` drops them on the next write (see LEGACY_SLOT_KEYS).
+//
+// NOT bumped for the addition of the `pdf` slot either, for the same reason in
+// the other direction: a schema-7 record written before it existed simply lacks
+// the key. `updateRecord` back-fills it on the next write, every reader goes
+// through `currentWindowStat` (which reads a missing stat as empty), and the
+// snapshot restore guard admits a record missing it (see ADDED_SLOT_KEYS).
 export const SCHEMA_VERSION = 7;
 export const TIER_STATS_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const WINDOW_MS = TIER_STATS_WINDOW_MS;
@@ -55,7 +61,10 @@ export type TierName =
   // no TierSlot: it is dispatched directly in fetchPage rather than being part
   // of the ordered cascade, so it stays out of computeTierSkips and the
   // tier_skip domain config entirely.
-  | "solver_byparr";
+  | "solver_byparr"
+  // Local PDF text extraction (src/pdf.ts). Another directly-dispatched
+  // TierName with no TierSlot, placed ahead of the cascade like github.
+  | "pdf_local";
 
 /**
  * The tier_stats_30d slot keys — the single roster of this closed set.
@@ -71,8 +80,16 @@ export const TIER_SLOT_KEYS = [
   "tier4",
   "github",
   "solver",
+  "pdf",
 ] as const;
 export type TierSlotKey = (typeof TIER_SLOT_KEYS)[number];
+/**
+ * Slots added to TIER_SLOT_KEYS after schema 7 shipped, without a bump. A
+ * schema-7 record may legitimately lack these; it may not lack any other slot.
+ * Consumed by the snapshot restore guard, which would otherwise reject every
+ * record written before the slot existed.
+ */
+export const ADDED_SLOT_KEYS: readonly TierSlotKey[] = ["pdf"];
 export type PreferredStrategy = "llms_full_txt" | "tier2" | "tier3";
 
 /**
@@ -203,6 +220,7 @@ function newRecord(domain: string, now: string): DomainRecord {
       tier4: emptyStat(),
       github: emptyStat(),
       solver: emptyStat(),
+      pdf: emptyStat(),
     },
   };
 }
@@ -282,6 +300,10 @@ function updateRecord(
     }
     const stats = record.tier_stats_30d as Record<string, TierStat>;
     for (const legacy of LEGACY_SLOT_KEYS) delete stats[legacy];
+    // Back-fill slots added without a schema bump (ADDED_SLOT_KEYS), so every
+    // mutator can index tier_stats_30d[slot] without a guard. The window starts
+    // now, so the back-filled stat claims nothing it did not measure.
+    for (const slot of TIER_SLOT_KEYS) stats[slot] ??= emptyStat();
     if ((record.preferred_strategy as string | undefined) === "tier1") {
       delete record.preferred_strategy;
     }
@@ -297,6 +319,7 @@ const TIER_KEY: Record<TierName, TierSlotKey> = {
   tier4_wayback: "tier4",
   github: "github",
   solver_byparr: "solver",
+  pdf_local: "pdf",
 };
 
 export async function recordTierAttempt(

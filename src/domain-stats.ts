@@ -55,6 +55,7 @@ const TIER_SLOT_LABELS: Record<TierSlotKey, string> = {
   tier4: "tier4 (wayback)  ",
   github: "github (fastpath)",
   solver: "solver (byparr)  ",
+  pdf: "pdf (local)      ",
 };
 
 // A domain is "failing" if it has enough attempts to judge and a low overall
@@ -417,7 +418,12 @@ export interface SingleDomainSummary {
   };
 }
 
-function tierAggregateOf(raw: TierStat, now: number): TierAggregate {
+// `raw` may be undefined: a schema-7 record written before a slot in
+// ADDED_SLOT_KEYS existed lacks it, and currentWindowStat reads that as empty.
+function tierAggregateOf(
+  raw: TierStat | undefined,
+  now: number,
+): TierAggregate {
   const stat = currentWindowStat(raw, now);
   return {
     attempts: stat.attempts,
@@ -460,7 +466,15 @@ export function summarizeDomainRecord(
 
 // ── Human-readable formatters (shared by the dump-domain CLI and the tool) ───
 
-function tierLine(label: string, raw: TierStat, now: number): string {
+function tierLine(
+  label: string,
+  raw: TierStat | undefined,
+  now: number,
+): string {
+  // A slot the record predates (ADDED_SLOT_KEYS) has never been attempted —
+  // not an expired window, which is what currentWindowStat's fresh object
+  // would otherwise make it look like below.
+  if (!raw) return `  ${label}: no data`;
   const stat = currentWindowStat(raw, now);
   const expired = stat !== raw;
   const successRate = renderRate(stat.ok, stat.attempts);

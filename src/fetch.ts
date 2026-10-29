@@ -4,8 +4,14 @@ import {
   ChallengeDetectedError,
   type ChallengeSignal,
 } from "./challenge.js";
-import { FETCH_CACHE_TTL_SECONDS, WAYBACK_ENABLED } from "./config.js";
-import { probeStructuredContent } from "./content-type.js";
+import {
+  FETCH_CACHE_TTL_SECONDS,
+  PDF_EXTRACT_ENABLED,
+  PDF_MAX_BYTES,
+  PDF_MAX_PAGES,
+  WAYBACK_ENABLED,
+} from "./config.js";
+import { probeContentKind } from "./content-type.js";
 import {
   recordMetadataFetchAttempt,
   recordPostExtractSample,
@@ -25,6 +31,7 @@ import { histerConfigured, histerFetch } from "./hister.js";
 import { isKiwixHost, kiwixFetch } from "./kiwix.js";
 import { isLlmsTxtDomain, tryLlmsTxtFetch } from "./llms-txt.js";
 import { incCounter, recordHistogram, withSpan } from "./observability.js";
+import { isPdfUrlPath, PdfUnextractableError, pdfFetch } from "./pdf.js";
 import { isRedditHost, redditFetch } from "./reddit.js";
 import { checkRobots } from "./robots.js";
 import { getTiers, TIER_NAME } from "./routing.js";
@@ -509,33 +516,111 @@ export async function fetchPage(
       // resolution (surfaces to the caller as a fetch error).
       await assertResolvedPublic(url);
 
-      // SECURITY[accepted]: PDF URLs take this path to tier 2 rather than
-      // being diverted earlier, so they share tier 2's pre-existing SSRF-10
-      // exposure — Crawl4AI resolves and connects in its own process, so the
-      // pre-check above narrows but cannot fully close the DNS-rebinding
-      // TOCTOU window for it. No new code-level gap: the gap is
-      // unchanged, only the set of URLs traversing it grew. Audit:
+      // SECURITY[control]: assertResolvedPublic runs once here, before any
+      // dispatch below — the PDF and content-type fast paths as well as the
+      // cascade. A PDF the local path cannot serve still falls through to
+      // tier 2, and so shares tier 2's pre-existing SSRF-10 exposure (Crawl4AI
+      // resolves and connects in its own process, so the pre-check narrows but
+      // cannot fully close the DNS-rebinding window for it). Audit:
       // 2026-09-06/searxng-mcp-fix-pass-2026-09, finding SSRF-10 (Low) —
       // auditor's own disposition was "no action required from this build".
-      // SECURITY[control]: assertResolvedPublic runs once here, before any tier
-      // dispatch, for every URL including PDFs.
 
-      // No PDF fast path. Neither rendering tier extracts PDF text: Crawl4AI
-      // renders the PDF in a browser, finds no text nodes and misfires its
-      // anti-bot heuristic, so PDFs fall through to tier 3, which rejects them
-      // with an explicit message (tiers/raw.ts). Firecrawl v2 parsed PDFs
-      // natively; it was removed in this fork, so PDF support needs a local
-      // extractor ahead of the cascade (vikunja#682 for the history).
+      // Why each tier produced nothing, in dispatch order. Seeded with the
+      // tiers that never ran, so "skipped because unconfigured" and "ran and
+      // came back empty" stay distinguishable in the final error rather than
+      // collapsing into one unexplained failure (vikunja#682). Declared ahead
+      // of the fast paths so a pdf_local failure that falls through is named
+      // in that error too.
+      const outcomes: TierOutcome[] = skipDecisions.map((d) => ({
+        tier: TIER_NAME[d.tier],
+        reason: `skipped (${d.reason})`,
+      }));
+      const noteOutcome = (o: TierOutcome) => outcomes.push(o);
+
+      // One HEAD answers both diversions below. A `.pdf` path is taken at its
+      // word and skips the probe; everything else — including the
+      // extensionless PDFs (arxiv.org/pdf/<id>, ?download= handlers) a suffix
+      // matcher never sees — is identified by its Content-Type.
+      //
+      // Probe is fail-open: an unreachable, HEAD-refusing or HTML-serving host
+      // returns null and drops through to the normal cascade unchanged. Only a
+      // positive identification diverts.
+      const probedKind =
+        PDF_EXTRACT_ENABLED && isPdfUrlPath(url)
+          ? "pdf"
+          : await probeContentKind(url);
+
+      // PDF fast path — local text extraction (src/pdf.ts, unpdf). The only
+      // PDF reader in this build: Crawl4AI renders a PDF in a browser, finds
+      // no text nodes and misfires its anti-bot heuristic, and tier 3 reads
+      // bodies as text. Dispatched directly with a TierName but no TierSlot,
+      // like github and solver_byparr. PDF_EXTRACT_ENABLED=false turns it off
+      // and PDFs take the cascade (and fail there, as they did before it).
+      //
+      // Fail-open, except for one answer: a PDF that parsed but has no text
+      // layer (scanned) or needs a password. That is a fact about the
+      // document, and the cascade cannot do better, so it is surfaced rather
+      // than buried under a tier-by-tier failure list. Everything else — a
+      // non-PDF body at a .pdf path, an oversize file, a 404, a parse error —
+      // falls through to the cascade.
+      if (probedKind === "pdf" && PDF_EXTRACT_ENABLED) {
+        let unextractable: string | null = null;
+        const pdf = await runTier(
+          "pdf_local",
+          url,
+          async () => {
+            try {
+              return await pdfFetch(url, storeChars, {
+                maxBytes: PDF_MAX_BYTES,
+                maxPages: PDF_MAX_PAGES,
+              });
+            } catch (err) {
+              if (err instanceof PdfUnextractableError) {
+                unextractable = err.message;
+              }
+              throw err;
+            }
+          },
+          onChallenge,
+          noteOutcome,
+        );
+        if (pdf) {
+          console.error(`[searxng-mcp] fetch pdf_local hit url=${url}`);
+          const persisted = { title: pdf.title, url: pdf.url, text: pdf.text };
+          await cacheSet(
+            key,
+            JSON.stringify(persisted),
+            FETCH_CACHE_TTL_SECONDS,
+          );
+          events.fetchCompleted({
+            url,
+            tier_served: "pdf_local",
+            title: pdf.title,
+            text_len: pdf.text.length,
+            latency_ms: Date.now() - t_total,
+            source: "pdf_local",
+          });
+          return { ...persisted, text: persisted.text.slice(0, maxChars) };
+        }
+        if (unextractable) {
+          events.error({
+            stage: "fetch",
+            url,
+            error_type: "pdf_unextractable",
+            message: unextractable,
+          });
+          throw new Error(unextractable);
+        }
+        console.error(
+          `[searxng-mcp] fetch pdf_local miss url=${url} — falling through to cascade`,
+        );
+      }
 
       // Content-type fast path — a JSON/XML/YAML/CSV/plain-text endpoint has
       // nothing for a headless browser to render. A rendering tier returns
       // empty markdown for these and runTier books it as `empty_result`, which
       // poisons that tier's per-domain success rate for API and CDN hosts.
-      //
-      // Probe is fail-open: an unreachable, HEAD-refusing or HTML-serving host
-      // returns null and drops through to the normal cascade unchanged. Only a
-      // positive identification diverts.
-      const structuredKind = await probeStructuredContent(url);
+      const structuredKind = probedKind === "pdf" ? null : probedKind;
       if (structuredKind) {
         console.error(
           `[searxng-mcp] fetch content_type fast_path url=${url} kind=${structuredKind}`,
@@ -577,16 +662,6 @@ export async function fetchPage(
 
       // Run tier cascade and side-channel raw-HTML metadata fetch in parallel.
       const metadataHtmlPromise = fetchRawHtmlForMetadata(url);
-
-      // Why each tier produced nothing, in cascade order. Seeded with the
-      // tiers that never ran, so "skipped because unconfigured" and "ran and
-      // came back empty" stay distinguishable in the final error rather than
-      // collapsing into one unexplained failure (vikunja#682).
-      const outcomes: TierOutcome[] = skipDecisions.map((d) => ({
-        tier: TIER_NAME[d.tier],
-        reason: `skipped (${d.reason})`,
-      }));
-      const noteOutcome = (o: TierOutcome) => outcomes.push(o);
 
       let fetched: TierResult | null = null;
       for (const tier of activeTiers) {

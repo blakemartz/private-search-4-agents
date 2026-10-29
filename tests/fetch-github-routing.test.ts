@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/config.js", () => ({
   FETCH_CACHE_TTL_SECONDS: 86400,
+  PDF_EXTRACT_ENABLED: true,
+  PDF_MAX_BYTES: 20 * 1024 * 1024,
+  PDF_MAX_PAGES: 50,
   WAYBACK_ENABLED: false,
   YOUTUBE_TRANSCRIPT_ENABLED: false,
   YOUTUBE_IGNORE_ROBOTS: false,

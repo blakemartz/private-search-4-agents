@@ -28,6 +28,7 @@ Every response body read from a third party, and the one request body this serve
 | Read | Limit | Notes |
 |---|---|---|
 | Fetch tiers (raw, Crawl4AI, solver, Wayback, Reddit, YouTube, GitHub, sitemap/crawl) | `RAW_HTML_MAX_BYTES` (2 MB) | Shared `readBoundedText` helper. |
+| PDF fast path | `PDF_MAX_BYTES` (20 MB) | `readBoundedBytes` — binary-safe; refuses (rather than truncates) an oversize body, since a truncated PDF does not parse. Page walk capped by `PDF_MAX_PAGES`. |
 | `llms-full.txt` probe | `MAX_SIZE_BYTES` (64 MB) | Read one byte past the ceiling so an oversized document is still *detected* as oversized and reported absent, rather than truncated to the limit and served as if complete. |
 | HTTP transport request body | `HTTP_MAX_BODY_BYTES` (1 MB) | `initialize` path only; `413` on exceeding. |
 

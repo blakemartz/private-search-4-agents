@@ -117,7 +117,7 @@ describe("rawFetch", () => {
       body: bodyStream("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj"),
     });
     await expect(rawFetch(URL)).rejects.toThrow(
-      "PDF content cannot be extracted — no tier in this build parses PDF text",
+      "PDF content cannot be extracted by raw fetch",
     );
   });
 
@@ -143,9 +143,10 @@ describe("rawFetch", () => {
 
 describe("rawFetch — PDF failure message names the real cause", () => {
   // The old message read "use Crawl4AI", which was wrong: Crawl4AI cannot
-  // parse PDFs either. With Firecrawl removed, no tier in this build extracts
-  // PDF text, and the message must say exactly that rather than send the
-  // operator after a backend that will not help.
+  // parse PDFs either. The local PDF path in fetchPage (src/pdf.ts) is the only
+  // PDF reader, so a PDF reaching raw fetch means that path was skipped or
+  // failed — and the message must point there, not at a backend that will not
+  // help.
   const pdfResponse = () => ({
     ok: true,
     status: 200,
@@ -154,10 +155,10 @@ describe("rawFetch — PDF failure message names the real cause", () => {
     body: bodyStream("%PDF-1.4\ntrailer"),
   });
 
-  it("states that no tier in this build parses PDF text", async () => {
+  it("points at the local PDF path that was skipped or failed", async () => {
     mockFetch.mockResolvedValueOnce(pdfResponse());
     await expect(rawFetch(URL)).rejects.toThrow(
-      /no tier in this build parses PDF text/,
+      /local PDF path was skipped or failed.*pdf_local.*PDF_EXTRACT_ENABLED/,
     );
   });
 

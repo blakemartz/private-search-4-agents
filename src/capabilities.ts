@@ -17,6 +17,7 @@ import {
   KIWIX_URL,
   LLM_BASE_URL,
   OLLAMA_URL,
+  PDF_EXTRACT_ENABLED,
   RERANKER_URL,
   SOLVER_ENABLED,
   SOLVER_URL,
@@ -54,6 +55,7 @@ export function capabilities(): Record<string, boolean> {
     hister: histerConfigured(),
     solver: SOLVER_ENABLED && Boolean(SOLVER_URL),
     wayback: WAYBACK_ENABLED,
+    pdf: PDF_EXTRACT_ENABLED,
     otel: Boolean(process.env.OTEL_EXPORTER_OTLP_ENDPOINT),
     nats: Boolean(process.env.NATS_URL),
   };
@@ -64,10 +66,10 @@ export function capabilities(): Record<string, boolean> {
  *
  * Everything NOT listed here is backed by a remote dependency this process has
  * not spoken to at startup, so "configured" is all we can honestly claim about
- * it. tier3 is in-process (raw fetch + Readability) and wayback is a plain
- * feature flag; both are as true as they will ever be.
+ * it. tier3 is in-process (raw fetch + Readability), pdf is in-process (unpdf)
+ * and wayback is a plain feature flag; all are as true as they will ever be.
  */
-const SELF_CONTAINED = new Set(["tier3", "wayback"]);
+const SELF_CONTAINED = new Set(["tier3", "wayback", "pdf"]);
 
 export type CapabilityState = "on" | "unverified" | "off";
 

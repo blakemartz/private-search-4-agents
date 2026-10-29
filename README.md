@@ -34,11 +34,11 @@ startup, so `unverified` is not a health failure — it's the honest absence of 
 an error. The command above prints exactly this:
 
 ```
-capabilities on=tier3 unverified=none off=tier2,cache,reranker,llm,kiwix,hister,solver,wayback,otel,nats
+capabilities on=tier3,pdf unverified=none off=tier2,cache,reranker,llm,kiwix,hister,solver,wayback,otel,nats
 ```
 
-`tier3` is the only thing `on`, because it is the only capability that is true without anything
-remote working. `wayback` is `off` until you set `WAYBACK_ENABLED=true` — it is a feature flag,
+`tier3` and `pdf` are the only things `on`, because they are the only capabilities that are true
+without anything remote working — both run in-process. `wayback` is `off` until you set `WAYBACK_ENABLED=true` — it is a feature flag,
 not a default.
 
 The two overrides are what make it a *clean* minimal run rather than merely a working one.
@@ -100,6 +100,7 @@ differentiators here are in what happens *after* the search:
 | SearXNG search | yes | yes |
 | ML reranking of results | local cross-encoder, reorders by relevance — ships in [`docker/reranker/`](docker/reranker/) | SearXNG's own ordering |
 | Full-page content retrieval | fetch cascade — Crawl4AI, in-process raw fetch + Readability, opt-in solver and Wayback | none, or a single raw fetch |
+| PDF text | in-process extraction (`unpdf`), keyless — `.pdf` URLs and extensionless PDFs alike | none |
 | Per-domain routing | domain capability database learns which tier works per domain and skips the ones that do not | none |
 | Summarisation | Ollama, with citations back to source URLs | none |
 | Site crawling | `crawl_site` — sitemap-first, optional BFS, scoped to the start URL's path | none |
@@ -168,6 +169,8 @@ flowchart TD
     kiwix{"Kiwix host?\nKIWIX_URL set"}
     kiwix_fetch["Local Kiwix ZIM\nWikipedia · Stack Overflow · Arch Wiki\n→ cache + return"]
     robots["robots.txt pre-check — tiers 2–3\ndisallowed → RobotsDisallowedError (cached 24h)"]
+    pdf{"PDF?\n.pdf path, or HEAD says application/pdf"}
+    pdf_fetch["Local PDF extraction — unpdf, in-process\npage-marked text · PDF_EXTRACT_ENABLED\n→ cache + return"]
     tier_skip(["Per-domain tier skip\nsuccess rate &lt;30% over ≥10 tries\nor tier_skip operator override"])
     t2["Tier 2 — Crawl4AI\n$CRAWL4AI_URL · optional\ndirect — no adblock proxy"]
     t3["Tier 3 — Raw HTTP + Readability\nfallback: raw HTML slice\nadblock proxy if $ADBLOCK_PROXY_URL"]
@@ -186,7 +189,10 @@ flowchart TD
     llms -->|no| kiwix
     kiwix -->|yes| kiwix_fetch
     kiwix -->|no| robots
-    robots --> tier_skip
+    robots --> pdf
+    pdf -->|yes| pdf_fetch
+    pdf -->|no| tier_skip
+    pdf_fetch -->|"miss / error\n(not: no text layer)"| tier_skip
     tier_skip --> t2
     t2 -->|success| post
     t2 -->|"empty / error"| t3
@@ -209,6 +215,8 @@ flowchart TD
     style kiwix fill:#fff9c4,stroke:#b8860b,color:#000000
     style kiwix_fetch fill:#fff9c4,stroke:#b8860b,color:#000000
     style robots fill:#ffffff,stroke:#333333,color:#000000
+    style pdf fill:#dae8fc,stroke:#6c8ebf,color:#000000
+    style pdf_fetch fill:#dae8fc,stroke:#6c8ebf,color:#000000
     style tier_skip fill:#f5f5f5,stroke:#666666,color:#000000
     style t2 fill:#d5e8d4,stroke:#5a8a4a,color:#000000
     style t3 fill:#d5e8d4,stroke:#5a8a4a,color:#000000

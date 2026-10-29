@@ -58,6 +58,7 @@
     "jsdom": "^29.1.1",
     "robots-parser": "^3.0.1",
     "undici": "^7.29.0",
+    "unpdf": "^1.8.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {

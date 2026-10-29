@@ -156,3 +156,57 @@ export async function readBoundedText(
   // would be a no-op on multi-byte content.
   return (buf.byteLength > cap ? buf.subarray(0, cap) : buf).toString("utf-8");
 }
+
+/** Thrown by readBoundedBytes when a body exceeds its byte cap. */
+export class BodyTooLargeError extends Error {
+  constructor(limit: number) {
+    super(`Response body exceeds ${limit} bytes`);
+    this.name = "BodyTooLargeError";
+  }
+}
+
+/**
+ * Read a response body as raw bytes, refusing anything over `limit`.
+ *
+ * The binary sibling of readBoundedText, for formats that must be parsed whole
+ * (PDF). Decoding such a body as UTF-8 corrupts it, and truncating it does not
+ * yield a shorter document but an unparseable one — so where readBoundedText
+ * truncates, this throws. Same streaming discipline: the cap is checked as
+ * chunks arrive and the stream is cancelled the moment it is exceeded, so an
+ * oversize body is never buffered whole. A declared Content-Length over the cap
+ * is refused before the first read.
+ *
+ * A response with no readable stream yields an empty buffer.
+ */
+export async function readBoundedBytes(
+  res: Response,
+  limit: number,
+): Promise<Uint8Array> {
+  const cap = Math.max(0, Math.floor(limit));
+  const declared = Number(res.headers.get("content-length") ?? Number.NaN);
+  if (Number.isFinite(declared) && declared > cap) {
+    res.body?.cancel().catch(() => {});
+    throw new BodyTooLargeError(cap);
+  }
+  const reader = res.body?.getReader();
+  if (!reader) return new Uint8Array(0);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > cap) {
+      reader.cancel().catch(() => {});
+      throw new BodyTooLargeError(cap);
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
+}

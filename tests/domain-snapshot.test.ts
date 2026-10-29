@@ -9,6 +9,7 @@ import {
 } from "../src/domain-db.js";
 import {
   applyRestore,
+  isStructurallyValidRecord,
   listSnapshots,
   loadLatestSnapshot,
   pruneSnapshots,
@@ -36,6 +37,7 @@ function mkRecord(domain: string, lastFetch: string): DomainRecord {
       tier4: emptyStat(),
       github: emptyStat(),
       solver: emptyStat(),
+      pdf: emptyStat(),
     },
   };
 }
@@ -363,5 +365,31 @@ describe("applyRestore abandons rather than reporting a dead datastore as skips"
     expect(r.restored).toBe(3);
     expect(r.skipped).toBe(1);
     expect(r.restored + r.skipped).toBe(r.total);
+  });
+});
+
+describe("isStructurallyValidRecord — slots added without a schema bump", () => {
+  function withoutSlot(slot: string): unknown {
+    const r = mkRecord("a.com", "2026-06-01T00:00:00Z") as unknown as {
+      tier_stats_30d: Record<string, unknown>;
+    };
+    delete r.tier_stats_30d[slot];
+    return r;
+  }
+
+  it("admits a schema-7 record written before the pdf slot existed", () => {
+    expect(isStructurallyValidRecord(withoutSlot("pdf"))).toBe(true);
+  });
+
+  it("still rejects a record missing an original slot", () => {
+    expect(isStructurallyValidRecord(withoutSlot("tier2"))).toBe(false);
+  });
+
+  it("still validates the pdf slot when it is present", () => {
+    const r = mkRecord("a.com", "2026-06-01T00:00:00Z") as unknown as {
+      tier_stats_30d: Record<string, unknown>;
+    };
+    r.tier_stats_30d.pdf = { attempts: "many", ok: 0, fail: 0 };
+    expect(isStructurallyValidRecord(r)).toBe(false);
   });
 });

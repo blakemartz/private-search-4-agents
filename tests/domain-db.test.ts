@@ -582,3 +582,64 @@ describe("getDomainRecord", () => {
     expect(await getDomainRecord("https://example.com")).toBeNull();
   });
 });
+
+// The `pdf` slot was added without a SCHEMA_VERSION bump (see the comment on
+// SCHEMA_VERSION): schema-7 records written before it simply lack the key, and
+// must keep working rather than throw or be discarded.
+describe("slots added without a schema bump (ADDED_SLOT_KEYS)", () => {
+  beforeEach(() => {
+    cacheGetMock.mockReset();
+    cacheAtomicUpdateMock.mockReset();
+  });
+
+  function legacyRecord(): Record<string, unknown> {
+    const fresh = { attempts: 0, ok: 0, fail: 0, window_start_ms: Date.now() };
+    return {
+      schema_version: 7,
+      domain: "example.com",
+      first_seen: "2026-05-01T00:00:00Z",
+      last_fetch: "2026-05-01T00:00:00Z",
+      capabilities: {},
+      tier_stats_30d: {
+        tier2: { attempts: 4, ok: 4, fail: 0, window_start_ms: Date.now() },
+        tier3: { ...fresh },
+        tier4: { ...fresh },
+        github: { ...fresh },
+        solver: { ...fresh },
+      },
+    };
+  }
+
+  it("records a pdf_local attempt on a record that predates the slot", async () => {
+    const { getStored } = setupAtomicMock(JSON.stringify(legacyRecord()));
+    await recordTierAttempt("https://example.com/a.pdf", "pdf_local", "hit");
+    const written = lastWrittenRecord(getStored());
+    expect(written.tier_stats_30d.pdf).toMatchObject({
+      attempts: 1,
+      ok: 1,
+      fail: 0,
+    });
+    // The rest of the record survives — no rebuild, unlike a schema bump.
+    expect(written.tier_stats_30d.tier2.attempts).toBe(4);
+  });
+
+  it("back-fills the missing slot on any write, as an empty window", async () => {
+    const { getStored } = setupAtomicMock(JSON.stringify(legacyRecord()));
+    await recordTierAttempt("https://example.com/p", "tier3_rawfetch", "miss");
+    const written = lastWrittenRecord(getStored());
+    expect(written.tier_stats_30d.pdf).toMatchObject({
+      attempts: 0,
+      ok: 0,
+      fail: 0,
+    });
+    expect(Object.keys(written.tier_stats_30d).sort()).toEqual(
+      [...TIER_SLOT_KEYS].sort(),
+    );
+  });
+
+  it("still reads a record that predates the slot", async () => {
+    cacheGetMock.mockResolvedValue(JSON.stringify(legacyRecord()));
+    const record = await getDomainRecord("https://example.com");
+    expect(record?.domain).toBe("example.com");
+  });
+});

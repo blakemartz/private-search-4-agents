@@ -14,6 +14,7 @@ const CAP_ENV = [
   "SOLVER_URL",
   "SOLVER_ENABLED",
   "WAYBACK_ENABLED",
+  "PDF_EXTRACT_ENABLED",
   "OTEL_EXPORTER_OTLP_ENDPOINT",
   "NATS_URL",
   "HISTER_TOKEN",
@@ -31,12 +32,18 @@ beforeEach(() => {
 afterEach(clearCapEnv);
 
 describe("capabilityLine", () => {
-  it("reports a bare deployment as tier3 on, the rest unverified or off", async () => {
+  it("reports a bare deployment as tier3 and pdf on, the rest unverified or off", async () => {
     const { capabilityLine } = await import("../src/capabilities.js");
     expect(capabilityLine()).toBe(
-      "capabilities on=tier3 unverified=cache,reranker " +
+      "capabilities on=tier3,pdf unverified=cache,reranker " +
         "off=tier2,llm,kiwix,hister,solver,wayback,otel,nats",
     );
+  });
+
+  it("reports pdf off under its kill switch", async () => {
+    process.env.PDF_EXTRACT_ENABLED = "false";
+    const { capabilityStates } = await import("../src/capabilities.js");
+    expect(capabilityStates().pdf).toBe("off");
   });
 
   it("stays a single line however many capabilities are on", async () => {
@@ -163,9 +170,9 @@ describe("capabilityLine", () => {
     const { capabilityStates } = await import("../src/capabilities.js");
     const states = capabilityStates();
     const on = Object.keys(states).filter((k) => states[k] === "on");
-    // tier3 is in-process; wayback is a plain feature flag. Anything else
-    // appearing here is claiming health it has not established.
-    expect(on.sort()).toEqual(["tier3", "wayback"]);
+    // tier3 and pdf are in-process; wayback is a plain feature flag.
+    // Anything else appearing here is claiming health it has not established.
+    expect(on.sort()).toEqual(["pdf", "tier3", "wayback"]);
   });
 
   // The fix has to apply to every capability derived from a URL, not just the

@@ -19,6 +19,7 @@ import {
 } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
+  ADDED_SLOT_KEYS,
   DOMAIN_RECORD_TTL_SECONDS,
   type DomainRecord,
   domainKey,
@@ -93,6 +94,10 @@ export function isStructurallyValidRecord(
   const tiers = r.tier_stats_30d as Record<string, unknown>;
   for (const slot of TIER_SLOTS) {
     const stat = tiers[slot] as Record<string, unknown> | undefined;
+    // A slot added after schema 7 shipped may be absent from a record written
+    // before it existed; that is a well-formed record, not a crafted one. If
+    // present it is validated like any other slot.
+    if (stat === undefined && ADDED_SLOT_KEYS.includes(slot)) continue;
     if (!stat || typeof stat !== "object") return false;
     if (
       typeof stat.attempts !== "number" ||

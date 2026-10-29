@@ -90,7 +90,7 @@ vi.mock("../src/llms-txt.js", () => ({
 }));
 
 vi.mock("../src/content-type.js", () => ({
-  probeStructuredContent: vi.fn().mockResolvedValue(null),
+  probeContentKind: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("../src/reddit.js", () => ({
