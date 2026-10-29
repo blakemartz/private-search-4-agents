@@ -101,7 +101,7 @@ and add it to `~/.pi/agent/mcp.json`:
 ```json
 { "mcpServers": { "web": {
   "url": "http://127.0.0.1:3001/mcp",
-  "headers": { "Authorization": "!echo Bearer $(sed -n 's/^SEARXNG_MCP_AUTH_TOKEN=//p' ~/dev/websearch/.env.searxng-mcp)" },
+  "headers": { "Authorization": "!echo Bearer $(sed -n 's/^SEARXNG_MCP_AUTH_TOKEN=//p' path/to/your.env)" },
   "exposure": "direct", "timeout": 180,
   "description": "Private web search (self-hosted SearXNG, local rerank, local page fetch): search, fetch_url, crawl_site" } } }
 ```

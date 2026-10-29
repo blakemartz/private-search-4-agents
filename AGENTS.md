@@ -120,8 +120,8 @@ change:
 
 ```bash
 pnpm build
-node --env-file=~/dev/websearch/.env.searxng-mcp scripts/bench.mjs
-node --env-file=~/dev/websearch/.env.searxng-mcp scripts/bench.mjs --cases scripts/bench-holdout.json
+node --env-file=path/to/your.env scripts/bench.mjs
+node --env-file=path/to/your.env scripts/bench.mjs --cases scripts/bench-holdout.json
 ```
 
 ## URL safety
