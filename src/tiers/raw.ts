@@ -8,6 +8,11 @@ import {
   looksLikeHtml,
   renderStructured,
 } from "../content-type.js";
+import { htmlToMarkdown } from "../extractors/markdown.js";
+import {
+  articleToMarkdown,
+  READABILITY_OPTIONS,
+} from "../extractors/readability.js";
 import {
   type FetchTuning,
   readBoundedText,
@@ -132,18 +137,19 @@ export async function rawFetch(
   if (tuning?.targetSelector) {
     const el = doc.querySelector(tuning.targetSelector);
     if (el) {
-      selectorFallback = el.textContent;
+      selectorFallback = htmlToMarkdown(el.outerHTML, url) || el.textContent;
       doc = new JSDOM(el.outerHTML, { url }).window.document;
     }
   }
 
-  const reader = new Readability(doc);
+  const reader = new Readability(doc, READABILITY_OPTIONS);
   const article = reader.parse();
 
-  const text = (article?.textContent ?? selectorFallback ?? html).slice(
-    0,
-    maxChars,
-  );
+  const text = (
+    articleToMarkdown(article, url) ??
+    selectorFallback ??
+    html
+  ).slice(0, maxChars);
   const title = article?.title ?? url;
   return { title, url, text, html };
 }
