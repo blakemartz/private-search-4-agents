@@ -100,7 +100,7 @@ describe("LLM_DISABLE_THINKING", () => {
 describe("RERANK_RECENCY_WEIGHT parsing/fallback", () => {
   it("defaults to 0.15 when unset", async () => {
     const { RERANK_RECENCY_WEIGHT } = await import("../../src/core/config.js");
-    expect(RERANK_RECENCY_WEIGHT).toBe(0.15);
+    expect(RERANK_RECENCY_WEIGHT).toBe(0.05);
   });
 
   it("parses a valid custom value", async () => {

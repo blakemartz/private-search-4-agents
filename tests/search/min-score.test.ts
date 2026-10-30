@@ -113,8 +113,8 @@ describe("min_score — filtering", () => {
     // floor rejects outrank one it accepts:
     //
     //   a      raw 0.95, no date  -> sorts 0.95   keep
-    //   fresh  raw 0.30, today    -> sorts ~0.45  DROP (raw 0.30 < 0.4)
-    //   c      raw 0.42, no date  -> sorts 0.42   keep
+    //   fresh  raw 0.30, today    -> sorts ~0.35  DROP (raw 0.30 < 0.32)
+    //   c      raw 0.33, no date  -> sorts 0.33   keep
     //
     // Filter-then-slice returns [a, c]. Slice-then-filter takes [a, fresh]
     // first and then drops fresh, returning just [a] — a result lost to a
@@ -122,11 +122,11 @@ describe("min_score — filtering", () => {
     //
     // An earlier version of this test used a low-relevance, undated result,
     // which sorted last anyway and so passed under BOTH orderings.
-    stubReranker([0.95, 0.3, 0.42]);
+    stubReranker([0.95, 0.3, 0.33]);
     const today = new Date().toISOString();
     const input = [result("a"), result("fresh", today), result("c")];
 
-    const out = await rerankWithFallback("q", input, 2, undefined, 0.4);
+    const out = await rerankWithFallback("q", input, 2, undefined, 0.32);
     expect(out.map((r) => r.title)).toEqual(["a", "c"]);
   });
 
@@ -144,8 +144,8 @@ describe("min_score — which score it compares", () => {
     // THE central test of this phase.
     //
     // "fresh" scores 0.30 raw and is published today, so with the default
-    // RERANK_RECENCY_WEIGHT of 0.15 its combined sort score is ~0.45 — above a
-    // 0.40 threshold. Its RAW relevance is 0.30, below it.
+    // RERANK_RECENCY_WEIGHT of 0.05 its combined sort score is ~0.35 — above a
+    // 0.33 threshold. Its RAW relevance is 0.30, below it.
     //
     // Filtering on the combined score would keep "fresh"; filtering on raw
     // relevance drops it. If this test ever flips, a "minimum relevance"
@@ -155,25 +155,26 @@ describe("min_score — which score it compares", () => {
     const today = new Date().toISOString();
     const input = [result("fresh", today), result("relevant")];
 
-    const out = await rerankWithFallback("q", input, 10, undefined, 0.4);
+    const out = await rerankWithFallback("q", input, 10, undefined, 0.33);
     expect(out.map((r) => r.title)).toEqual(["relevant"]);
   });
 
   it("still ORDERS by the recency-adjusted score", async () => {
     // Filtering on raw relevance must not disturb ranking: recency still wins
     // the sort among results that clear the floor.
-    stubReranker([0.6, 0.65]);
+    stubReranker([0.62, 0.65]);
     const today = new Date().toISOString();
     const input = [result("recent", today), result("stale")];
 
-    // Both clear 0.5. "recent" gets +0.15*~1.0 => ~0.75 vs "stale" 0.65.
+    // Both clear 0.5. "recent" gets +0.05*~1.0 => ~0.67 vs "stale" 0.65.
     const out = await rerankWithFallback("q", input, 10, undefined, 0.5);
     expect(out.map((r) => r.title)).toEqual(["recent", "stale"]);
   });
 
   it("does not apply recency at all when time_range is set", async () => {
     // Pre-existing behaviour, pinned because min_score now shares this path.
-    stubReranker([0.6, 0.65]);
+    // With recency applied "recent" would sort ~0.67, above "stale".
+    stubReranker([0.62, 0.65]);
     const today = new Date().toISOString();
     const input = [result("recent", today), result("stale")];
 

@@ -40,6 +40,9 @@ tool surface, Firecrawl configuration and the minimum Node.js version all change
 
 ### Changed
 
+- **`RERANK_RECENCY_WEIGHT` default 0.15 → 0.05.** Recency breaks ties among saturated scores
+  but no longer outweighs the authority prior: at 0.15 a recent tutorial outranked
+  nodejs.org/api/fs.html. Set it back with `RERANK_RECENCY_WEIGHT=0.15`.
 - **Search finds and ranks the project's own docs more often.** Measured by replaying one
   recording of the SearXNG pools against both builds: gold@1 40% → 70% and MRR 0.52 → 0.80 on
   the held-out set, gold@1 60% → 70% and MRR 0.63 → 0.70 on the tuning set.
@@ -82,6 +85,12 @@ tool surface, Firecrawl configuration and the minimum Node.js version all change
   chunks each, only when the top result is not already the project's own page, within a
   2.5 s budget (`DOCS_RESCORE_BUDGET_MS`); a page not read in time keeps its snippet score and
   lands in the page cache. `DOCS_RESCORE_ENABLED=false` turns it off.
+- **Docs-host probe.** When no domain names the project (or the name match already covers the
+  topic, as cache-control.com does), the docs probe falls back to the first docs host in the
+  pool with no page on the topic and searches `site:<that host>`: MDN's Cache-Control header
+  page now reaches the results for a Cache-Control question.
+- **Wiki pages name the project.** On a docs host, the page name after `/title/` or `/wiki/`
+  counts as the project (wiki.archlinux.org/title/Systemd for a systemd question).
 - **`scripts/bench.mjs --record` / `--replay`.** Save every SearXNG response of a run, then rank
   against the saved pools: variants compare on identical pools, without the pool drift that moves
   gold@1 by a case or two between live runs, and without sending anything to the engines.

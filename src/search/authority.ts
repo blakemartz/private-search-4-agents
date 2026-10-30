@@ -118,6 +118,11 @@ export function isForumUrl(url: URL): boolean {
   return FORUM_HOST.test(url.hostname) || FORUM_PATH.test(url.pathname);
 }
 
+/** A documentation host by name: docs.*, developer.*, man.*, wiki.* and the like. */
+export function isDocsHost(host: string): boolean {
+  return DOCS_HOST.test(host);
+}
+
 /** A docs host or docs-shaped path, at least two segments deep (not an index page). */
 export function isDeepDocsUrl(url: URL): boolean {
   const depth = url.pathname.split("/").filter(Boolean).length;
@@ -197,8 +202,14 @@ export function authority(
   }
   const terms = queryTerms(query);
   // Shared docs hosts carry the project in the first path segment instead:
-  // docs.rs/tokio/..., developer.hashicorp.com/terraform/...
-  const firstSegment = decodeSegment(path.split("/")[1] ?? "");
+  // docs.rs/tokio/..., developer.hashicorp.com/terraform/... A wiki puts its
+  // page name after /title/ or /wiki/: wiki.archlinux.org/title/Systemd/User.
+  const segments = path.split("/").filter(Boolean);
+  const firstSegment = decodeSegment(
+    (WIKI_PREFIX.has(segments[0]?.toLowerCase() ?? "")
+      ? segments[1]
+      : segments[0]) ?? "",
+  );
   const projectHost =
     !forum &&
     (hostNamesQueryTerm(host, terms) ||
@@ -213,6 +224,9 @@ export function authority(
     (projectHost ? 1 : 0) + (docsShaped ? 0.5 : 0) + (boosted ? 0.5 : 0);
   return { projectHost, docsShaped, boosted, total };
 }
+
+/** Path segments a wiki puts before the page name. */
+const WIKI_PREFIX = new Set(["title", "wiki"]);
 
 function decodeSegment(segment: string): string {
   try {

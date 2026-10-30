@@ -16,6 +16,7 @@ import type { SearxResult } from "../core/types.js";
 import {
   hostNamesQueryTerm,
   isDeepDocsUrl,
+  isDocsHost,
   isForumUrl,
   queryTerms,
 } from "./authority.js";
@@ -70,7 +71,39 @@ export function projectDomainToProbe(
         onDomain(v.hostname, domain) &&
         (isDeepDocsUrl(v) || pathNamesTerm(v.pathname, topic)),
     );
-    return covered ? null : domain;
+    // Covered by its own pages: a docs host elsewhere may still lack the
+    // topic. A name match is not proof of a project; cache-control.com
+    // "names" the Cache-Control query and covers it with SEO pages.
+    return covered ? docsHostToProbe(terms, urls, domain) : domain;
+  }
+  return docsHostToProbe(terms, urls);
+}
+
+/**
+ * Without a project domain, the first docs host in the pool with no page on
+ * the topic: for "HTTP Cache-Control no-cache vs no-store" the pool held MDN's
+ * /docs/Web/HTTP index and nothing deeper, and `site:developer.mozilla.org`
+ * returns the Cache-Control header page first. The host itself is probed, not
+ * its registrable domain: mozilla.org would also search support.mozilla.org.
+ *
+ * Coverage here is only a path naming a query term. A deep docs page does not
+ * count, since a docs host is deep everywhere (/en-US/docs/Web/HTTP).
+ */
+function docsHostToProbe(
+  terms: string[],
+  urls: URL[],
+  /** A project domain the pool already covers; its docs hosts count as covered. */
+  coveredDomain?: string,
+): string | null {
+  for (const u of urls) {
+    if (!isDocsHost(u.hostname)) continue;
+    if (coveredDomain && onDomain(u.hostname, coveredDomain)) return null;
+    const host = u.hostname.toLowerCase();
+    const covered = urls.some(
+      (v) =>
+        v.hostname.toLowerCase() === host && pathNamesTerm(v.pathname, terms),
+    );
+    return covered ? null : host;
   }
   return null;
 }

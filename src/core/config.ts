@@ -399,8 +399,14 @@ export const CRAWL_BFS_MAX_DEPTH = parseInt(
   process.env.CRAWL_BFS_MAX_DEPTH ?? "3",
   10,
 );
+/**
+ * Weight of the recency score added to the rerank score. A tie-breaker among
+ * saturated scores, kept below the authority prior: at 0.15 a post published
+ * this week earned as much as being the project's own site, and coddy.tech
+ * outranked nodejs.org/api/fs.html for "nodejs fs promises readFile encoding".
+ */
 export const RERANK_RECENCY_WEIGHT = (() => {
-  const v = parseFloat(process.env.RERANK_RECENCY_WEIGHT ?? "0.15");
+  const v = parseFloat(process.env.RERANK_RECENCY_WEIGHT ?? "0.05");
   if (Number.isNaN(v) || v < 0) {
     console.warn(
       `[searxng-mcp] RERANK_RECENCY_WEIGHT="${process.env.RERANK_RECENCY_WEIGHT}" is invalid; recency weighting disabled.`,

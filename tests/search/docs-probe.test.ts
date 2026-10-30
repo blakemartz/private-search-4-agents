@@ -65,6 +65,47 @@ describe("projectDomainToProbe", () => {
       ]),
     ).toBeNull();
   });
+
+  const cc = "HTTP Cache-Control no-cache vs no-store difference";
+
+  it("falls back to a docs host with no page on the topic, probing the host itself", () => {
+    expect(
+      projectDomainToProbe(cc, [
+        r("https://stackoverflow.com/questions/7573354"),
+        r("https://developer.mozilla.org/en-US/docs/Web/HTTP"),
+      ]),
+    ).toBe("developer.mozilla.org");
+  });
+
+  it("takes the docs host even when a name-matching domain covers the topic", () => {
+    // cache-control.com "names" the query; its pages are not MDN's.
+    expect(
+      projectDomainToProbe(cc, [
+        r("https://www.cache-control.com/no-cache-vs-no-store/"),
+        r("https://developer.mozilla.org/en-US/docs/Web/HTTP"),
+      ]),
+    ).toBe("developer.mozilla.org");
+  });
+
+  it("skips a docs host that already has a page naming the topic", () => {
+    expect(
+      projectDomainToProbe(cc, [
+        r("https://developer.mozilla.org/en-US/docs/Web/HTTP"),
+        r(
+          "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control",
+        ),
+      ]),
+    ).toBeNull();
+  });
+
+  it("does not fall back to the covered project's own docs host", () => {
+    expect(
+      projectDomainToProbe("python asyncio TaskGroup", [
+        r("https://docs.python.org/3/library/asyncio-task.html"),
+        r("https://docs.python.org/3/"),
+      ]),
+    ).toBeNull();
+  });
 });
 
 describe("withProjectDocs", () => {

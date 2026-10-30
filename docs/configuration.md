@@ -11,6 +11,7 @@ All service URLs are configurable via environment variables.
 | `SEARXNG_ATTEMPT_TIMEOUT_MS` | `10000` | Per-instance ceiling, further capped by whatever remains of `SEARXNG_TOTAL_TIMEOUT_MS`. |
 | `SEARXNG_UNHEALTHY_TTL_SECONDS` | `30` | How long a failed instance is deprioritised for. A hint that reorders candidates, not a circuit breaker — an unhealthy instance is moved to the back, never removed, and if every instance is marked down the full list is still tried. Stored in the cache so the hint is shared across processes; a cache outage degrades to "try every instance in configured order". |
 | `RERANKER_URL` | `http://localhost:8787` | Reranker instance URL |
+| `RERANK_RECENCY_WEIGHT` | `0.05` | Weight of the recency score (exponential decay, 90-day scale) added to the rerank score; skipped when `time_range` is set; `0` disables. Kept below the authority weight so a fresh post does not outrank the project's docs |
 | `RERANK_AUTHORITY_WEIGHT` | `0.15` | Weight of the authority prior added to the rerank score (project-named host, docs-shaped URL, boosted domain); `0` disables. See [architecture](architecture.md#authority-prior) |
 | `GITHUB_TOKEN` | *(unset)* | GitHub personal access token — increases rate limit from 60 to 5,000 req/hour |
 | `OLLAMA_URL` | *(unset)* | Ollama API base URL — required for `expand` and `search` with `answer: true` |

@@ -406,4 +406,4 @@ volumes:
 #   NATS_URL                nats://localhost:4222
 #   CACHE_TTL_SECONDS       3600
 #   FETCH_CACHE_TTL_SECONDS 86400
-#   RERANK_RECENCY_WEIGHT   0.15
+#   RERANK_RECENCY_WEIGHT   0.05

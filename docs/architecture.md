@@ -328,6 +328,8 @@ Measured with `scripts/bench.mjs` (10 tuning questions, 10 held-out): authoritat
 
 The prior can only promote a page that is in the pool, and often the docs page is not: for "typescript satisfies operator vs type annotation" the engines returned eight blog posts plus typescriptlang.org's home and docs index, but not the 4.9 release notes that document the operator. When the pool names the project's domain (a registrable domain that matches a query term, by the same rule as the prior) but holds no page from it on the topic, `search` runs the same query once more as `site:<domain>` and adds up to 5 new pages from that domain before reranking (`src/search/docs-probe.ts`).
 
+When no domain names the project, or the one that does already covers the topic, the probe falls back to the first docs host in the pool (`docs.*`, `developer.*`, `man.*`, `wiki.*`) none of whose pages has a path naming a query term, and probes that host rather than its registrable domain. For "HTTP Cache-Control no-cache vs no-store difference" the pool held only MDN's `/docs/Web/HTTP` index, and `site:developer.mozilla.org` returns the Cache-Control header page first. It also runs after a covered name match because a name match is not proof of a project: cache-control.com "names" that query and covers it with its own pages. The project's own docs hosts never trigger it.
+
 "On the topic" means a deep docs-shaped page, or any page whose path names one of the query's other terms (`valkey.io/commands/eval` for "valkey EVAL lua script"). That rule exists to save engine calls: on an instance where one engine carries the results, extra queries are what get it suspended for too many requests. The probe is skipped with `include_domains` (already scoped) and outside the `general` category, is cached like any search, and a failed probe returns the original pool. `DOCS_PROBE_ENABLED=false` turns it off.
 
 Measured 2026-10-29 by replaying one recording of the SearXNG pools (`scripts/bench.mjs --record` / `--replay`, engines bing + yahoo + yandex) against both builds, so both rank identical pools. Together with the prior changes above and keeping SearXNG's whole first page (~30 results, previously cut to 15; reranking the extra snippets costs ~40 ms): gold@1 60% → 70% and MRR 0.63 → 0.70 on the tuning set, gold@1 40% → 70%, gold@5 70% → 90% and MRR 0.52 → 0.80 on the held-out set.
@@ -340,11 +342,21 @@ Cost control: nothing runs when the top result is already a project page (most q
 
 Measured 2026-10-29 by replay on the same pools as above: tuning gold@1 70% → 80%, MRR 0.70 → 0.80 (tokio `select!` moves to rank 1); held-out unchanged at gold@1 70%, gold@5 90%, MRR 0.80. Median `search` latency stays ~110 ms; a query that triggers the rescore with cold pages pays up to the budget. A 12 s budget changed nothing on the held-out set, so the misses there are pages that were read and did not beat the leader.
 
+### Docs-host probe, wiki page names, recency weight
+
+Three follow-ups, measured 2026-10-30 by replay against the pools above (re-recorded only for the new probe queries; one extra probe per set):
+
+- The docs-host fallback above: MDN's Cache-Control page enters the pool and ranks 4th (it was absent).
+- A wiki host names the project in the page name after `/title/` or `/wiki/`: wiki.archlinux.org/title/Systemd/User is the project's page for a systemd question, not just a docs-shaped one. It moves from below the top 5 to rank 1.
+- `RERANK_RECENCY_WEIGHT` default 0.15 → 0.05. At 0.15 a post from this week earned as much as being the project's own site, and coddy.tech outranked nodejs.org/api/fs.html; at 0.05 recency still breaks ties among saturated scores but does not outweigh authority. 0.05 and 0 measured the same.
+
+Together: tuning gold@1 80% → 90%, gold@5 80% → 100%, MRR 0.80 → 0.925; held-out gold@1 70% → 80%, MRR 0.80 → 0.85, gold@5 90%. The remaining held-out misses are openssh (man.openbsd.org never in the pool) and the kernel release notes (kernelnewbies.org ranks 8th; kernel.org's home page is 2nd).
+
 ## Relevance filtering (`min_score`)
 
 `search` accepts `min_score` (0–1), a floor applied after reranking. Omit it and nothing changes.
 
-It filters on the **raw cross-encoder `relevance_score`**, not on the value used for ordering. Ranking sorts by `relevance_score + RERANK_RECENCY_WEIGHT * recencyScore(publishedDate)`, which with the default weight of `0.15` ranges over **0–1.15, not 0–1**. Filtering a parameter called "minimum relevance" on that number would quietly make it mean "relevant enough *or* recent enough". Filtering happens before the top-N slice, so the floor never costs you a result that cleared it.
+It filters on the **raw cross-encoder `relevance_score`**, not on the value used for ordering. Ranking sorts by `relevance_score + RERANK_RECENCY_WEIGHT * recencyScore(publishedDate)`, which with the default weight of `0.05` ranges over **0–1.05, not 0–1** (plus the authority prior). Filtering a parameter called "minimum relevance" on that number would quietly make it mean "relevant enough *or* recent enough". Filtering happens before the top-N slice, so the floor never costs you a result that cleared it.
 
 Two things make this knob behave differently from how a 0–1 range suggests. Both were measured against the local FlashRank service on the query *"how to configure nginx reverse proxy"*:
 

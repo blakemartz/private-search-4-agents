@@ -73,6 +73,8 @@ describe("authority", () => {
       "terraform for_each",
       "https://developer.hashicorp.com/terraform/language/meta-arguments/for_each",
     ],
+    ["systemd user service", "https://wiki.archlinux.org/title/Systemd/User"],
+    ["systemd user service", "https://wiki.gentoo.org/wiki/Systemd"],
   ])("finds the project in a docs host's first path segment: %s", (q, url) => {
     expect(authority(q, url, []).projectHost).toBe(true);
   });
