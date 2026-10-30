@@ -17,6 +17,7 @@ import {
 import { urlMatchesDomain } from "../../domains/rules.js";
 import { FETCH_STORE_CEILING, fetchPage } from "../../fetch/fetch-page.js";
 import { windowText } from "../../fetch/paging.js";
+import { withProjectDocs } from "../../search/docs-probe.js";
 import {
   formatSummaryFallbackNotice,
   formatSummaryResult,
@@ -327,7 +328,7 @@ export async function handleSearch(args: SearchArgs) {
     async () => {
       const perQuery = await Promise.all(
         queries.map(async (q) => {
-          const { results, meta } = await searxSearch(
+          const { results: pool, meta } = await searxSearch(
             q,
             category ?? "general",
             max_results,
@@ -339,6 +340,18 @@ export async function handleSearch(args: SearchArgs) {
             include.length > 0 ? include : undefined,
             fresh,
           );
+          // A caller's include_domains already scopes the search.
+          const results =
+            include.length > 0
+              ? pool
+              : await withProjectDocs(q, pool, {
+                  category: category ?? "general",
+                  timeRange: time_range,
+                  domainProfile: domain_profile,
+                  language,
+                  engines,
+                  fresh,
+                });
           const ranked = await rerankWithFallback(
             q,
             filterDomains(results, include, exclude),

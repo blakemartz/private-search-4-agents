@@ -314,13 +314,23 @@ The cross-encoder's scores saturate: for a typical developer question five or si
 
 | Signal | Bonus (before weight) |
 |---|---|
-| A hostname label names a query term — `python` → `docs.python.org`, `postgres` → `postgresql.org`, `git` → `git-scm.com`; generic labels (`docs`, `dev`, `blog`, `github`, …) never count | 1 |
+| A hostname label names a query term — `python` → `docs.python.org`, `postgres` → `postgresql.org`, `git` → `git-scm.com`. A prefix match may leave at most two characters or `lang` over (`typescriptlang.org`), so `linux` is not `linuxiac.com` and `postgres` is not `postgrespro.com`; generic labels (`docs`, `dev`, `blog`, `github`, …) never count. On a docs host the first path segment counts too: `docs.rs/tokio/…`, `developer.hashicorp.com/terraform/…`. Never on a forum, by host (`discuss.`, `forum.`, `users.`, `bbs.`, …) or path (`/t/`, `/threads/`, `/viewtopic`, …): `discuss.python.org` is community Q&A, like Stack Overflow. Protocol and format names (`http`, `json`, `ssh`, …) are topics, not projects, so `http.dev` is not "the project" for an HTTP question | 1 |
 | Docs-shaped URL — `docs.`/`developer.`/`man.` host, or a `/docs/`, `/reference/`, `/api/`, `/manual/`, `/std/` path | 0.5 |
-| The domain is in the global or profile `boost` list | 1 |
+| The domain is in the global or profile `boost` list | 0.5 |
 
-The sum is multiplied by `RERANK_AUTHORITY_WEIGHT` (default `0.1`), so the largest possible lift is 0.25 — enough to reorder near-ties, never enough to lift an off-topic page (≈0.01) over an on-topic one. Domain boosts are applied here because the older pre-rerank boost sort was undone by the reranker's own sort whenever the reranker was up.
+A boost is worth half the project's own name. It records the operator's preference for a domain, which is weaker evidence than "this is the project's site", and at equal weight the default boosts (`github.com`, `stackoverflow.com`, …) tied every docs page.
+
+The sum is multiplied by `RERANK_AUTHORITY_WEIGHT` (default `0.15`), so the largest possible lift is 0.3 — enough to reorder near-ties, never enough to lift an off-topic page (≈0.01) over an on-topic one. Domain boosts are applied here because the older pre-rerank boost sort was undone by the reranker's own sort whenever the reranker was up.
 
 Measured with `scripts/bench.mjs` (10 tuning questions, 10 held-out): authoritative page at rank 1 went 30% → 60% (tuning) and 0% → 40% (held-out); in the top 5, 60% → 90% and 50% → 80%. `min_score` is unaffected — it still filters on the raw relevance.
+
+## Project docs probe
+
+The prior can only promote a page that is in the pool, and often the docs page is not: for "typescript satisfies operator vs type annotation" the engines returned eight blog posts plus typescriptlang.org's home and docs index, but not the 4.9 release notes that document the operator. When the pool names the project's domain (a registrable domain that matches a query term, by the same rule as the prior) but holds no page from it on the topic, `search` runs the same query once more as `site:<domain>` and adds up to 5 new pages from that domain before reranking (`src/search/docs-probe.ts`).
+
+"On the topic" means a deep docs-shaped page, or any page whose path names one of the query's other terms (`valkey.io/commands/eval` for "valkey EVAL lua script"). That rule exists to save engine calls: on an instance where one engine carries the results, extra queries are what get it suspended for too many requests. The probe is skipped with `include_domains` (already scoped) and outside the `general` category, is cached like any search, and a failed probe returns the original pool. `DOCS_PROBE_ENABLED=false` turns it off.
+
+Measured 2026-10-29 by replaying one recording of the SearXNG pools (`scripts/bench.mjs --record` / `--replay`, engines bing + yahoo + yandex) against both builds, so both rank identical pools. Together with the prior changes above and keeping SearXNG's whole first page (~30 results, previously cut to 15; reranking the extra snippets costs ~40 ms): gold@1 60% → 70% and MRR 0.63 → 0.70 on the tuning set, gold@1 40% → 70%, gold@5 70% → 90% and MRR 0.52 → 0.80 on the held-out set.
 
 ## Relevance filtering (`min_score`)
 

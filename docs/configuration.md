@@ -11,7 +11,7 @@ All service URLs are configurable via environment variables.
 | `SEARXNG_ATTEMPT_TIMEOUT_MS` | `10000` | Per-instance ceiling, further capped by whatever remains of `SEARXNG_TOTAL_TIMEOUT_MS`. |
 | `SEARXNG_UNHEALTHY_TTL_SECONDS` | `30` | How long a failed instance is deprioritised for. A hint that reorders candidates, not a circuit breaker — an unhealthy instance is moved to the back, never removed, and if every instance is marked down the full list is still tried. Stored in the cache so the hint is shared across processes; a cache outage degrades to "try every instance in configured order". |
 | `RERANKER_URL` | `http://localhost:8787` | Reranker instance URL |
-| `RERANK_AUTHORITY_WEIGHT` | `0.1` | Weight of the authority prior added to the rerank score (project-named host, docs-shaped URL, boosted domain); `0` disables. See [architecture](architecture.md#authority-prior) |
+| `RERANK_AUTHORITY_WEIGHT` | `0.15` | Weight of the authority prior added to the rerank score (project-named host, docs-shaped URL, boosted domain); `0` disables. See [architecture](architecture.md#authority-prior) |
 | `GITHUB_TOKEN` | *(unset)* | GitHub personal access token — increases rate limit from 60 to 5,000 req/hour |
 | `OLLAMA_URL` | *(unset)* | Ollama API base URL — required for `expand` and `search` with `answer: true` |
 | `OLLAMA_API_KEY` | *(unset)* | Bearer token for authenticated Ollama proxies — adds `Authorization: Bearer <key>` header when set |
@@ -33,6 +33,7 @@ All service URLs are configurable via environment variables.
 | `CRAWL_BFS_ENABLED` | `false` | Set to `true` to enable the BFS (link-following) fallback in `crawl_site`. Server-side only — the tool has no per-call switch. |
 | `CRAWL_BFS_MAX_DEPTH` | `3` | Maximum link-hop depth for BFS crawl |
 | `EXPAND_QUERIES` | `false` | Set to `true` to enable query expansion globally |
+| `DOCS_PROBE_ENABLED` | `true` | One `site:` follow-up query for the project's own domain when the pool names it but has none of its pages on the topic; `false` disables. See [architecture](architecture.md#project-docs-probe) |
 | `CRAWL4AI_URL` | *(unset)* | Crawl4AI instance URL — enables tier 2, the JS-rendering first tier of the fetch cascade. Unset, fetches go straight to tier 3 (raw HTTP) |
 | `FETCH_RAW_FIRST` | `true` | Try the raw HTTP tier before Crawl4AI; a raw result under ~1,500 chars of prose falls through to the browser. `false` restores browser-first. See [architecture](architecture.md#raw-first-cascade-order) |
 | `CRAWL4AI_ENABLED` | `true` | Set to `false` to skip tier 2 regardless of `CRAWL4AI_URL`. Tier 2 is also skipped when `CRAWL4AI_URL` is unset |

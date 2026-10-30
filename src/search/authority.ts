@@ -11,7 +11,7 @@
 //
 // Deliberately crude and bounded: each signal is cheap to compute, visible in
 // the URL, and capped, so it can reorder near-ties but cannot lift an
-// off-topic page over an on-topic one (a 0.01 page gains at most ~0.2).
+// off-topic page over an on-topic one (a 0.01 page gains at most 0.3).
 
 import { urlMatchesDomain } from "../domains/rules.js";
 
@@ -41,6 +41,32 @@ const STOPWORDS = new Set([
   "working",
   "without",
   "from",
+]);
+
+/**
+ * Protocol and format names are topics, not projects: a host built on one is a
+ * vendor's brand. For "HTTP Cache-Control no-cache vs no-store" http.dev was
+ * treated as the project and outranked MDN.
+ */
+const TOPIC_TERMS = new Set([
+  "http",
+  "https",
+  "html",
+  "css",
+  "json",
+  "xml",
+  "yaml",
+  "api",
+  "rest",
+  "web",
+  "url",
+  "sql",
+  "tcp",
+  "udp",
+  "dns",
+  "ssh",
+  "tls",
+  "ssl",
 ]);
 
 /** Labels that carry no project identity. */
@@ -76,6 +102,29 @@ const GENERIC_LABELS = new Set([
 const DOCS_PATH =
   /\/(docs?|reference|manual|man|api|library|std|spec|handbook)(\/|$)/i;
 const DOCS_HOST = /^(docs|doc|developer|developers|man|manual|wiki)\./i;
+/**
+ * A project's own forum is community Q&A, the same kind of source as Stack
+ * Overflow, not its documentation. Without this, discuss.python.org outranked
+ * docs.python.org for "python asyncio TaskGroup exception handling", because
+ * both "named the project". Forums live on a host (discuss.python.org) or
+ * under a path (linux.org/threads/...).
+ */
+const FORUM_HOST =
+  /^(discuss|discourse|forum|forums|community|users|user|bbs|groups|lists)\./i;
+const FORUM_PATH =
+  /^\/(t|threads?|topics?|forums?|viewtopic(\.php)?|showthread(\.php)?|discussions?)(\/|$)/i;
+
+export function isForumUrl(url: URL): boolean {
+  return FORUM_HOST.test(url.hostname) || FORUM_PATH.test(url.pathname);
+}
+
+/** A docs host or docs-shaped path, at least two segments deep (not an index page). */
+export function isDeepDocsUrl(url: URL): boolean {
+  const depth = url.pathname.split("/").filter(Boolean).length;
+  return (
+    depth >= 2 && (DOCS_HOST.test(url.hostname) || DOCS_PATH.test(url.pathname))
+  );
+}
 
 export function queryTerms(query: string): string[] {
   return [
@@ -83,37 +132,50 @@ export function queryTerms(query: string): string[] {
       query
         .toLowerCase()
         .split(/[^a-z0-9]+/)
-        .filter((t) => t.length >= 3 && !STOPWORDS.has(t)),
+        .filter(
+          (t) => t.length >= 3 && !STOPWORDS.has(t) && !TOPIC_TERMS.has(t),
+        ),
     ),
   ];
 }
 
 /**
  * Does the hostname name the project the query is about? `python` matches
- * docs.python.org, `postgres` matches postgresql.org (prefix, 5+ chars), `git`
- * matches git-scm.com (hyphen-split label). Generic labels never match.
+ * docs.python.org, `postgres` matches postgresql.org (prefix, 5+ chars, at most
+ * two left over or `lang`), `git` matches git-scm.com (hyphen-split label). Generic labels
+ * never match. The leftover limit keeps a name from matching every brand built
+ * on it: `linux` is not linuxiac.com, `postgres` is not postgrespro.com,
+ * `redis` is not redisson.pro.
  */
 export function hostNamesQueryTerm(host: string, terms: string[]): boolean {
-  const labels = host
-    .toLowerCase()
-    .split(".")
+  return labelsNameQueryTerm(host.toLowerCase().split("."), terms);
+}
+
+function labelsNameQueryTerm(raw: string[], terms: string[]): boolean {
+  const labels = raw
     .flatMap((l) => [l, ...l.split("-")])
     .filter((l) => l.length >= 3 && !GENERIC_LABELS.has(l));
   return terms.some((t) =>
     labels.some(
       (l) =>
         l === t ||
-        (t.length >= 5 && l.startsWith(t)) ||
-        (l.length >= 5 && t.startsWith(l)),
+        (t.length >= 5 && l.startsWith(t) && nameSuffix(l.slice(t.length))) ||
+        (l.length >= 5 && t.startsWith(l) && nameSuffix(t.slice(l.length))),
     ),
   );
 }
 
+/** What may follow a project name in its domain: `postgres`+`ql`, `typescript`+`lang`. */
+function nameSuffix(rest: string): boolean {
+  return rest.length <= 2 || rest === "lang";
+}
+
 export interface AuthorityBreakdown {
+  /** The host names the project, or a docs host does in its first path segment. Never a forum. */
   projectHost: boolean;
   docsShaped: boolean;
   boosted: boolean;
-  /** Sum of the signals, before the weight is applied. 0..2.5 */
+  /** Sum of the signals, before the weight is applied. 0..2 */
   total: number;
 }
 
@@ -124,17 +186,38 @@ export function authority(
 ): AuthorityBreakdown {
   let host = "";
   let path = "";
+  let forum = false;
   try {
     const u = new URL(url);
     host = u.hostname;
     path = u.pathname;
+    forum = isForumUrl(u);
   } catch {
     return { projectHost: false, docsShaped: false, boosted: false, total: 0 };
   }
-  const projectHost = hostNamesQueryTerm(host, queryTerms(query));
+  const terms = queryTerms(query);
+  // Shared docs hosts carry the project in the first path segment instead:
+  // docs.rs/tokio/..., developer.hashicorp.com/terraform/...
+  const firstSegment = decodeSegment(path.split("/")[1] ?? "");
+  const projectHost =
+    !forum &&
+    (hostNamesQueryTerm(host, terms) ||
+      (DOCS_HOST.test(host) &&
+        labelsNameQueryTerm([firstSegment.toLowerCase()], terms)));
   const docsShaped = DOCS_HOST.test(host) || DOCS_PATH.test(path);
   const boosted = boostList.some((pat) => urlMatchesDomain(url, pat));
+  // A boost is half the project's own name: the operator prefers a domain, but
+  // that is weaker evidence than "this is the project's site". At equal weight
+  // the boosted github.com and stackoverflow.com tied every docs page.
   const total =
-    (projectHost ? 1 : 0) + (docsShaped ? 0.5 : 0) + (boosted ? 1 : 0);
+    (projectHost ? 1 : 0) + (docsShaped ? 0.5 : 0) + (boosted ? 0.5 : 0);
   return { projectHost, docsShaped, boosted, total };
+}
+
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }

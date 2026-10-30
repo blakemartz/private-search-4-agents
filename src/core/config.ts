@@ -250,6 +250,9 @@ export const LLM_API_KEY = process.env.LLM_API_KEY ?? "";
 export const LLM_DISABLE_THINKING =
   process.env.LLM_DISABLE_THINKING !== "false";
 export const EXPAND_QUERIES_DEFAULT = process.env.EXPAND_QUERIES === "true";
+// One `site:` follow-up query for the project's own domain when the first
+// pool names it but holds none of its docs pages (search/docs-probe.ts).
+export const DOCS_PROBE_ENABLED = process.env.DOCS_PROBE_ENABLED !== "false";
 export const KIWIX_URL = process.env.KIWIX_URL?.replace(/\/$/, "") ?? "";
 export const HISTER_URL = process.env.HISTER_URL?.replace(/\/$/, "") ?? "";
 export const HISTER_TOKEN = process.env.HISTER_TOKEN ?? "";
@@ -411,7 +414,7 @@ export const RERANK_RECENCY_WEIGHT = (() => {
  * on noise and recency. 0 disables it.
  */
 export const RERANK_AUTHORITY_WEIGHT = (() => {
-  const v = parseFloat(process.env.RERANK_AUTHORITY_WEIGHT ?? "0.1");
+  const v = parseFloat(process.env.RERANK_AUTHORITY_WEIGHT ?? "0.15");
   return Number.isNaN(v) || v < 0 ? 0 : v;
 })();
 

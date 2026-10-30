@@ -8,10 +8,21 @@
 //   node scripts/bench.mjs --fresh         # bypass caches (cold numbers)
 //   node scripts/bench.mjs --json out.json # also write per-case results
 //   node scripts/bench.mjs --cases scripts/bench-holdout.json  # held-out set
+//   node scripts/bench.mjs --record pools.json  # save every SearXNG response
+//   node scripts/bench.mjs --replay pools.json  # rank against the saved ones
+//
+// --record and --replay put a local stand-in in front of SearXNG (stdio mode
+// only) and run the server without a cache, so every search reaches it. Live
+// pools drift between calls, enough to move gold@1 by a case or two with no
+// ranking change; replaying one recording compares variants (another branch,
+// a weight) on identical pools and sends nothing to the engines. A query the
+// recording lacks (a variant asking something new) gets an empty pool and is
+// reported as a miss. Pages are still fetched live.
 //
 // Env for stdio mode comes from the caller (e.g. `node --env-file=... scripts/bench.mjs`).
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -42,7 +53,50 @@ function arg(name, fallback) {
 }
 const has = (name) => process.argv.includes(name);
 
-async function connect() {
+// Stand-in SearXNG for --record / --replay. Keyed on the parameters that
+// change a search; a repeated query in record mode is served from the
+// recording, so the engines see each query once.
+async function startPoolServer(upstream) {
+  const recordPath = arg("--record");
+  const replayPath = arg("--replay");
+  const file = recordPath ?? replayPath;
+  const pools =
+    file && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  const stats = { served: 0, recorded: 0, missed: [] };
+  const server = createServer(async (req, res) => {
+    const u = new URL(req.url, "http://x");
+    const p = u.searchParams;
+    const key = ["q", "categories", "time_range", "language", "engines"]
+      .map((k) => p.get(k) ?? "")
+      .join("|");
+    let body = pools[key];
+    if (body === undefined && recordPath) {
+      const r = await fetch(`${upstream}${u.pathname}${u.search}`);
+      if (r.ok) {
+        body = await r.text();
+        pools[key] = body;
+        stats.recorded++;
+      }
+    }
+    if (body === undefined) {
+      stats.missed.push(key);
+      body = JSON.stringify({ results: [] });
+    } else stats.served++;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(body);
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    stats,
+    close() {
+      server.close();
+      if (recordPath) writeFileSync(recordPath, JSON.stringify(pools));
+    },
+  };
+}
+
+async function connect(env = process.env) {
   const client = new Client({ name: "bench", version: "0" });
   const url = arg("--url");
   if (url) {
@@ -59,7 +113,7 @@ async function connect() {
       new StdioClientTransport({
         command: process.execPath,
         args: [resolve(ROOT, "build/src/index.js")],
-        env: process.env,
+        env,
         stderr: "ignore",
       }),
     );
@@ -124,7 +178,17 @@ async function main() {
   const cases = casesFile
     ? JSON.parse(readFileSync(resolve(casesFile), "utf8"))
     : CASES;
-  const client = await connect();
+  const pools =
+    has("--record") || has("--replay")
+      ? await startPoolServer(
+          (process.env.SEARXNG_URL ?? "http://localhost:8081")
+            .split(",")[0]
+            .trim(),
+        )
+      : null;
+  const client = await connect(
+    pools ? { ...process.env, SEARXNG_URL: pools.url, CACHE_URL: "" } : process.env,
+  );
   const fresh = has("--fresh");
   const { tools } = await client.listTools();
   const toolChars = tools.reduce((n, t) => n + JSON.stringify(t).length, 0);
@@ -144,6 +208,7 @@ async function main() {
     }
   }
   await client.close();
+  pools?.close();
 
   const ok = results.filter((r) => !r.error);
   const found = ok.filter((r) => r.search.goldRank !== null);
@@ -171,6 +236,14 @@ async function main() {
       fetch_query: Math.round(median(fq.map((r) => r.fetchQuery.chars)) / 4),
     },
   };
+  if (pools) {
+    summary.pools = {
+      served: pools.stats.served,
+      recorded: pools.stats.recorded,
+      missed: pools.stats.missed.length,
+    };
+    for (const k of new Set(pools.stats.missed)) console.log(`pool miss: ${k}`);
+  }
   console.log(JSON.stringify(summary, null, 2));
   const json = arg("--json");
   if (json) writeFileSync(json, JSON.stringify({ summary, results }, null, 2));

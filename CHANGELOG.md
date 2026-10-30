@@ -40,6 +40,19 @@ tool surface, Firecrawl configuration and the minimum Node.js version all change
 
 ### Changed
 
+- **Search finds and ranks the project's own docs more often.** Measured by replaying one
+  recording of the SearXNG pools against both builds: gold@1 40% → 70% and MRR 0.52 → 0.80 on
+  the held-out set, gold@1 60% → 70% and MRR 0.63 → 0.70 on the tuning set.
+  - The authority prior credits a docs host whose first path segment names the project
+    (`docs.rs/tokio/…`, `developer.hashicorp.com/terraform/…`), and no longer credits the
+    project's forums (`discuss.python.org`, `/threads/` paths), brands built on its name
+    (`linuxiac.com` for `linux`, `postgrespro.com` for `postgres`) or protocol names (`http.dev`
+    for an HTTP question).
+  - A `boost` domain now adds half what it did, so the default boosts (`github.com`,
+    `stackoverflow.com`, …) stop tying the official docs. `RERANK_AUTHORITY_WEIGHT` defaults to
+    `0.15` (was `0.1`), so the largest possible lift is 0.3.
+  - The reranker sees SearXNG's whole first page (~30 results) instead of the first 15; with
+    several engines merged the docs page was often at position 12–25.
 - **Source tree grouped by responsibility.** The flat 40-file `src/` is now `core/` (config,
   cache, logging, telemetry, types), `domains/` (rules, capability db, stats, snapshots),
   `search/` (SearXNG client, reranker, authority prior, passages, LLM), `fetch/` (orchestrator,
@@ -57,6 +70,15 @@ tool surface, Firecrawl configuration and the minimum Node.js version all change
 
 ### Added
 
+- **Project docs probe.** When the result pool names the project's domain (typescriptlang.org
+  for a TypeScript question) but holds none of its pages on the topic, `search` runs the query
+  once more as `site:<domain>` and adds up to 5 of its pages before reranking. That is how the
+  TypeScript 4.9 release notes, which document `satisfies`, reach rank 1. Skipped with
+  `include_domains` and outside the `general` category; cached like any search; a failed probe
+  keeps the original pool. `DOCS_PROBE_ENABLED=false` turns it off.
+- **`scripts/bench.mjs --record` / `--replay`.** Save every SearXNG response of a run, then rank
+  against the saved pools: variants compare on identical pools, without the pool drift that moves
+  gold@1 by a case or two between live runs, and without sending anything to the engines.
 - **`GET /livez`, a liveness probe that checks no dependency.** `/health` returns 503 while Valkey
   is unreachable, though the server keeps serving uncached, so a Kubernetes liveness probe on it
   would restart every replica during a cache outage. `/livez` always returns

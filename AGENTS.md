@@ -45,6 +45,7 @@ src/
     instances.ts      #   SearXNG instance list + health ordering
     reranker.ts       #   Jina-compatible reranker client + recency weighting + passage scoring
     authority.ts      #   Authority prior (project host, docs-shaped URL, boosted domain)
+    docs-probe.ts     #   One `site:` follow-up for the project's domain when the pool lacks its docs
     passages.ts       #   Chunk stored markdown (~700 chars), drop link-dominated chunks, rerank against a query
     ollama.ts         #   Ollama/OpenAI-compatible client (query expansion + search answer synthesis)
   fetch/              # Reading pages
@@ -162,6 +163,11 @@ pnpm build
 node --env-file=path/to/your.env scripts/bench.mjs
 node --env-file=path/to/your.env scripts/bench.mjs --cases scripts/bench-holdout.json
 ```
+
+Live pools drift between calls, and repeated `--fresh` runs can get an engine suspended for
+"too many requests". To compare two variants, record the pools once (`--record pools.json`) and
+`--replay pools.json` against each build: both then rank identical pools, and the engines see
+nothing. Replay runs the server without a cache, so pages are fetched live.
 
 ## URL safety
 
