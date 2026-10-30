@@ -332,6 +332,14 @@ The prior can only promote a page that is in the pool, and often the docs page i
 
 Measured 2026-10-29 by replaying one recording of the SearXNG pools (`scripts/bench.mjs --record` / `--replay`, engines bing + yahoo + yandex) against both builds, so both rank identical pools. Together with the prior changes above and keeping SearXNG's whole first page (~30 results, previously cut to 15; reranking the extra snippets costs ~40 ms): gold@1 60% → 70% and MRR 0.63 → 0.70 on the tuning set, gold@1 40% → 70%, gold@5 70% → 90% and MRR 0.52 → 0.80 on the held-out set.
 
+## Docs passage rescore
+
+The reranker scores the engine's title and snippet, and a docs page's snippet is often navigation or an opening line that never names the topic. For "tokio select! cancellation safety" docs.rs's `macro.select` page, which has a whole "Cancellation safety" section, scored 0.021 on its snippet while a dozen blog posts saturated at 0.999, so even the authority prior could not lift it. After reranking the whole pool, `search` reads up to 3 project-host pages whose snippet scored below 0.5 (deepest path first), scores 8 of each page's chunks with the same cross-encoder, and raises the page's relevance to its best passage's score before re-sorting on the same key (`src/search/passage-rescore.ts`). It never lowers a score, and term-overlap scores (reranker down) are ignored because they are on another scale.
+
+Cost control: nothing runs when the top result is already a project page (most queries), and the reads share a `DOCS_RESCORE_BUDGET_MS` budget (2.5 s). A page not read in time keeps its snippet score; its fetch still completes into the page cache, so a repeat search reads it from there. `DOCS_RESCORE_ENABLED=false` turns it off.
+
+Measured 2026-10-29 by replay on the same pools as above: tuning gold@1 70% → 80%, MRR 0.70 → 0.80 (tokio `select!` moves to rank 1); held-out unchanged at gold@1 70%, gold@5 90%, MRR 0.80. Median `search` latency stays ~110 ms; a query that triggers the rescore with cold pages pays up to the budget. A 12 s budget changed nothing on the held-out set, so the misses there are pages that were read and did not beat the leader.
+
 ## Relevance filtering (`min_score`)
 
 `search` accepts `min_score` (0–1), a floor applied after reranking. Omit it and nothing changes.

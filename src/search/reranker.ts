@@ -19,6 +19,27 @@ export function recencyScore(date?: string): number {
   return Math.exp(-ageDays / 90);
 }
 
+/**
+ * The sort key: raw cross-encoder relevance plus the recency and authority
+ * priors. Exported so a later step that revises `relevance` (passage-rescore)
+ * re-sorts on the same key.
+ */
+export function rankScore(
+  query: string,
+  result: SearxResult,
+  relevance: number,
+  applyRecency: boolean,
+  boostList: string[],
+): number {
+  return (
+    relevance +
+    (applyRecency
+      ? RERANK_RECENCY_WEIGHT * recencyScore(result.publishedDate)
+      : 0) +
+    RERANK_AUTHORITY_WEIGHT * authority(query, result.url, boostList).total
+  );
+}
+
 async function rerank(
   query: string,
   results: SearxResult[],
@@ -55,12 +76,13 @@ async function rerank(
       // Boosts are applied HERE, not only by applyDomainFilters' pre-sort:
       // that sort ran before the reranker re-sorted everything, so with a
       // reranker up a boosted domain got no lift at all.
-      const combined =
-        r.relevance_score +
-        (applyRecency
-          ? RERANK_RECENCY_WEIGHT * recencyScore(result.publishedDate)
-          : 0) +
-        RERANK_AUTHORITY_WEIGHT * authority(query, result.url, boostList).total;
+      const combined = rankScore(
+        query,
+        result,
+        r.relevance_score,
+        applyRecency,
+        boostList,
+      );
       // `relevance` is carried alongside `score` rather than being discarded
       // here, because the two are NOT interchangeable and `min_score` must
       // filter on the raw one. See the filter below.

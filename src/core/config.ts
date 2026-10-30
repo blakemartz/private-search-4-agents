@@ -253,6 +253,14 @@ export const EXPAND_QUERIES_DEFAULT = process.env.EXPAND_QUERIES === "true";
 // One `site:` follow-up query for the project's own domain when the first
 // pool names it but holds none of its docs pages (search/docs-probe.ts).
 export const DOCS_PROBE_ENABLED = process.env.DOCS_PROBE_ENABLED !== "false";
+// Rescore low-snippet project docs pages on their best passage
+// (search/passage-rescore.ts), within a wall-clock budget per search.
+export const DOCS_RESCORE_ENABLED =
+  process.env.DOCS_RESCORE_ENABLED !== "false";
+export const DOCS_RESCORE_BUDGET_MS = (() => {
+  const v = parseInt(process.env.DOCS_RESCORE_BUDGET_MS ?? "2500", 10);
+  return Number.isFinite(v) && v >= 0 ? v : 2500;
+})();
 export const KIWIX_URL = process.env.KIWIX_URL?.replace(/\/$/, "") ?? "";
 export const HISTER_URL = process.env.HISTER_URL?.replace(/\/$/, "") ?? "";
 export const HISTER_TOKEN = process.env.HISTER_TOKEN ?? "";

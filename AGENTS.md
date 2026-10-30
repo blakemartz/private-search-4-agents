@@ -46,6 +46,7 @@ src/
     reranker.ts       #   Jina-compatible reranker client + recency weighting + passage scoring
     authority.ts      #   Authority prior (project host, docs-shaped URL, boosted domain)
     docs-probe.ts     #   One `site:` follow-up for the project's domain when the pool lacks its docs
+    passage-rescore.ts #  Rescore low-snippet project docs pages on their best passage (page fetch injected)
     passages.ts       #   Chunk stored markdown (~700 chars), drop link-dominated chunks, rerank against a query
     ollama.ts         #   Ollama/OpenAI-compatible client (query expansion + search answer synthesis)
   fetch/              # Reading pages

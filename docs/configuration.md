@@ -34,6 +34,8 @@ All service URLs are configurable via environment variables.
 | `CRAWL_BFS_MAX_DEPTH` | `3` | Maximum link-hop depth for BFS crawl |
 | `EXPAND_QUERIES` | `false` | Set to `true` to enable query expansion globally |
 | `DOCS_PROBE_ENABLED` | `true` | One `site:` follow-up query for the project's own domain when the pool names it but has none of its pages on the topic; `false` disables. See [architecture](architecture.md#project-docs-probe) |
+| `DOCS_RESCORE_ENABLED` | `true` | Rescore up to 3 low-snippet project docs pages on their best passage; `false` disables. See [architecture](architecture.md#docs-passage-rescore) |
+| `DOCS_RESCORE_BUDGET_MS` | `2500` | Wall-clock budget for those page reads per query; a page not read in time keeps its snippet score |
 | `CRAWL4AI_URL` | *(unset)* | Crawl4AI instance URL — enables tier 2, the JS-rendering first tier of the fetch cascade. Unset, fetches go straight to tier 3 (raw HTTP) |
 | `FETCH_RAW_FIRST` | `true` | Try the raw HTTP tier before Crawl4AI; a raw result under ~1,500 chars of prose falls through to the browser. `false` restores browser-first. See [architecture](architecture.md#raw-first-cascade-order) |
 | `CRAWL4AI_ENABLED` | `true` | Set to `false` to skip tier 2 regardless of `CRAWL4AI_URL`. Tier 2 is also skipped when `CRAWL4AI_URL` is unset |

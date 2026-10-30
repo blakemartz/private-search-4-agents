@@ -76,6 +76,12 @@ tool surface, Firecrawl configuration and the minimum Node.js version all change
   TypeScript 4.9 release notes, which document `satisfies`, reach rank 1. Skipped with
   `include_domains` and outside the `general` category; cached like any search; a failed probe
   keeps the original pool. `DOCS_PROBE_ENABLED=false` turns it off.
+- **Docs pages rescored on their text.** A project docs page whose snippet scored low (below
+  0.5) is read and rescored on its best passage, so docs.rs's `select!` page, whose snippet
+  scored 0.021 for "tokio select! cancellation safety", ranks first. At most 3 pages and 8
+  chunks each, only when the top result is not already the project's own page, within a
+  2.5 s budget (`DOCS_RESCORE_BUDGET_MS`); a page not read in time keeps its snippet score and
+  lands in the page cache. `DOCS_RESCORE_ENABLED=false` turns it off.
 - **`scripts/bench.mjs --record` / `--replay`.** Save every SearXNG response of a run, then rank
   against the saved pools: variants compare on identical pools, without the pool drift that moves
   gold@1 by a case or two between live runs, and without sending anything to the engines.

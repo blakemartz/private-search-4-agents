@@ -23,6 +23,7 @@ import {
   formatSummaryResult,
   summarizePages,
 } from "../../search/ollama.js";
+import { rescoreFromPages } from "../../search/passage-rescore.js";
 import { selectPassages } from "../../search/passages.js";
 import { rerankWithFallback } from "../../search/reranker.js";
 import { searxSearch } from "../../search/searxng.js";
@@ -352,15 +353,33 @@ export async function handleSearch(args: SearchArgs) {
                   engines,
                   fresh,
                 });
-          const ranked = await rerankWithFallback(
+          const filtered = filterDomains(results, include, exclude);
+          // The whole pool comes back ranked so a docs page the snippet
+          // undersold can still climb into the top max_results.
+          const pooled = await rerankWithFallback(
             q,
-            filterDomains(results, include, exclude),
-            max_results,
+            filtered,
+            filtered.length,
             time_range,
             min_score,
             domain_profile,
           );
-          return { ranked, meta };
+          const rescored = await rescoreFromPages(q, pooled, {
+            fetchText: async (u) =>
+              (
+                await fetchPage(
+                  u,
+                  FETCH_STORE_CEILING,
+                  domain_profile,
+                  false,
+                  undefined,
+                  fresh,
+                )
+              ).text,
+            applyRecency: !time_range,
+            profile: domain_profile,
+          });
+          return { ranked: rescored.slice(0, max_results), meta };
         }),
       );
       const hits = mergeHits(perQuery.map((p) => p.ranked));
